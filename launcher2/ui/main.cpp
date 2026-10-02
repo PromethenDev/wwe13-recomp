@@ -635,19 +635,43 @@ void StartImportPackages(AppState& app, std::vector<fs::path> packages) {
   const fs::path game_folder = ActiveGameFolder(app);
   BeginJob(app, "Adding update or DLC…", [&app, paths, packages = std::move(packages), game_folder](
                                                         const ProgressFn& progress, CancelFlag& cancel) {
+    // Try every picked file: one unsupported file (e.g. an avatar item next to the DLC packs) must not stop the rest.
     Result result = Result::Ok();
+    size_t added = 0, already = 0;
+    std::vector<std::string> skipped;
+    std::string first_error;
     for (const auto& package : packages) {
       if (cancel.load()) {
         result = Result::Fail("The operation was canceled.");
         break;
       }
-      result = ImportPackage(package, paths, game_folder, progress, cancel);
-      if (!result.ok) break;
+      const Result one = ImportPackage(package, paths, game_folder, progress, cancel);
+      if (one.ok) {
+        ++added;
+      } else if (one.error == "This content is already installed.") {  // ImportDlc's message
+        ++already;
+      } else {
+        skipped.push_back(PathUtf8(package.filename()));
+        if (first_error.empty()) first_error = one.error;
+      }
     }
-    const GameFilesStatus status = result.ok ? CheckGameFolder(game_folder, paths) : GameFilesStatus{};
-    return JobOutcome{result, [&app, status, package_count = packages.size()] {
+    if (result.ok && added == 0 && already == 0) {
+      result = Result::Fail(packages.size() == 1 ? first_error : "None of the selected files could be added: " + first_error);
+    }
+    const GameFilesStatus status = added + already > 0 ? CheckGameFolder(game_folder, paths) : GameFilesStatus{};
+    return JobOutcome{result, [&app, status, added, already, skipped, package_count = packages.size()] {
                         if (!status.game_folder.empty()) app.game_files = status;
-                        SetBanner(app, package_count == 1 ? "The update or pack was added." : "The selected packs were added.", true);
+                        std::string text;
+                        if (added == 0) text = package_count == 1 ? "This pack is already installed." : "These packs are already installed.";
+                        else if (package_count == 1) text = "The update or pack was added.";
+                        else if (skipped.empty() && already == 0) text = "The selected packs were added.";
+                        else text = "Added " + std::to_string(added) + " of " + std::to_string(package_count) + ".";
+                        if (added > 0 && already > 0) text += " " + std::to_string(already) + " already installed.";
+                        if (!skipped.empty()) {
+                          text += " Skipped (not a WWE '13 update or pack, or unreadable): ";
+                          for (size_t i = 0; i < skipped.size(); ++i) text += (i ? ", " : "") + skipped[i];
+                        }
+                        SetBanner(app, text, true);
                       }};
   });
 }
@@ -1554,7 +1578,9 @@ void DrawGameFiles(AppState& app) {
     ImGui::TableNextColumn();
     if (BeginPanel(app, "add-package", ImVec2(tile, S(app, 88.0f)))) {
       if (ImGui::Button("Add TU or DLC", ImVec2(-1.0f, S(app, 32.0f)))) {
-        static const SDL_DialogFileFilter filters[]{{"Updates and packs", "con;live;pirs;zip;pkg;xexp"}};
+        // Real TU/DLC packages have no usual extension (TU_1A5225K_...0000000000082, "WWE '13 - Pack 1 (World) (DLC)"),
+        // so show every file; the launcher checks what was picked.
+        static const SDL_DialogFileFilter filters[]{{"Updates and packs", "*"}};
         RequestDialog(app, DialogKind::Package, filters, 1, true);
       }
       DrawTextDisabled(app, "Choose or drop an update or pack");
