@@ -1,7 +1,7 @@
 From b0e20dc98a63e80871c54a39a9ad4d636d840f7b Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 15:45:52 -0700
-Subject: [PATCH 36/85] graphics: enable persistent Vulkan shader/pipeline
+Subject: [PATCH 36/86] graphics: enable persistent Vulkan shader/pipeline
  storage
 
 The Xenia-derived storage (<user data>/cache/shaders/shareable/<title>.*)

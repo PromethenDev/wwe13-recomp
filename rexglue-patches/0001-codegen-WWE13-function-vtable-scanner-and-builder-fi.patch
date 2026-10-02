@@ -1,7 +1,7 @@
 From 40e770132a7b987088a919b3f3ec329b85ea4c73 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 12:48:58 -0700
-Subject: [PATCH 01/85] codegen: WWE13 function/vtable scanner and builder
+Subject: [PATCH 01/86] codegen: WWE13 function/vtable scanner and builder
  fixes
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

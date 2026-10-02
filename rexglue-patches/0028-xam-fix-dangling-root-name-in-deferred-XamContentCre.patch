@@ -1,7 +1,7 @@
 From 7414087ae227e9a99bdf9004acfb669eaf2b54ef Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 02:00:29 -0700
-Subject: [PATCH 28/85] xam: fix dangling root name in deferred
+Subject: [PATCH 28/86] xam: fix dangling root name in deferred
  XamContentCreate; log content API calls
 
 The deferred XamContentCreate lambda captured root_name.value() - a string_view

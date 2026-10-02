@@ -1,7 +1,7 @@
 From 198c76acefa44ef1749d11e494b993f222973e05 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 19:47:01 -0700
-Subject: [PATCH 51/85] census: TSC-based NowNs for the per-draw phase timers;
+Subject: [PATCH 51/86] census: TSC-based NowNs for the per-draw phase timers;
  display pacing samples mid-period
 
 - NowNs (two calls per draw with the census on, as in every laptop launcher) read steady_clock =

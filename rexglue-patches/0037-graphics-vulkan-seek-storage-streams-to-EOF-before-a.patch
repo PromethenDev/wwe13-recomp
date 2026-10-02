@@ -1,7 +1,7 @@
 From 59737a709ffb31691c07bed0b33f4a81e9b26cbb Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 16:24:48 -0700
-Subject: [PATCH 37/85] graphics(vulkan): seek storage streams to EOF before
+Subject: [PATCH 37/86] graphics(vulkan): seek storage streams to EOF before
  appending
 
 C requires a positioning call between input and output on an update

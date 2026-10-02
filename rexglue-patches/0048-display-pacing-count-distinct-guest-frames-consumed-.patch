@@ -1,7 +1,7 @@
 From 402c04b8adc5ebb7b39d119fcb49b4657d948958 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 18:27:44 -0700
-Subject: [PATCH 48/85] display pacing: count distinct guest frames consumed
+Subject: [PATCH 48/86] display pacing: count distinct guest frames consumed
  per display vblank, not host presents
 
 On the laptop the presenter presents on every display refresh (60/s) even at 30 guest frames/s, so presents

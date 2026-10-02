@@ -1,7 +1,7 @@
 From a740beef391b930104e5fba20b85d4bbe86def44 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 29 Sep 2026 02:08:11 -0700
-Subject: [PATCH 66/85] XMP custom music phase 2: real playback.
+Subject: [PATCH 66/86] XMP custom music phase 2: real playback.
  CustomMusicPlayer decodes mp3/flac/wav/ogg (vendored dr_libs + stb_vorbis,
  public domain/MIT-0) on a worker thread, resamples to the 48 kHz device rate
  and mixes into the SDL output; 0x7003B name-first play, 0x7000E song info,

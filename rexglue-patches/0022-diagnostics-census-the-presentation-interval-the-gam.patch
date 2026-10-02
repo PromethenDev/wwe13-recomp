@@ -1,7 +1,7 @@
 From c5b7cc236d9640ebdb5d25732cca07d2c45d7abe Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 13:55:36 -0700
-Subject: [PATCH 22/85] diagnostics: census the presentation interval the game
+Subject: [PATCH 22/86] diagnostics: census the presentation interval the game
  requests per swap
 
 With WWE13_RATE_CENSUS=1, VdSwap reads the guest D3D device (VdGlobalDevice)

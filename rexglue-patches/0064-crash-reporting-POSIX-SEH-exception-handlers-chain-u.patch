@@ -1,7 +1,7 @@
 From db4553c88fea937e9315e526cd4ffe17474a8758 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Mon, 28 Sep 2026 18:56:04 -0700
-Subject: [PATCH 64/85] crash reporting: POSIX SEH/exception handlers chain
+Subject: [PATCH 64/86] crash reporting: POSIX SEH/exception handlers chain
  unhandled faults to the previously installed handler (game crash note was
  buried); Windows flushes logging on exit; selected-GPU log line carries
  driver version

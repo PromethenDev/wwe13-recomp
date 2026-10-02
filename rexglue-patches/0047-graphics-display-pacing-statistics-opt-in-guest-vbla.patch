@@ -1,7 +1,7 @@
 From d289f5be3832c861a53ce944bf2543b40d4d947c Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 17:32:48 -0700
-Subject: [PATCH 47/85] graphics: display pacing statistics; opt-in guest
+Subject: [PATCH 47/86] graphics: display pacing statistics; opt-in guest
  vblank on the host display vblank
 
 display_pacing_stats (Windows): a thread waits on the host display's vblanks (DXGI output of the window's

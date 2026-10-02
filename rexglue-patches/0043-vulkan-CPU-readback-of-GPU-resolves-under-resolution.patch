@@ -1,7 +1,7 @@
 From 63a9fa76b7a5ac920f0f6bdf57dc8bb67edb2741 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 02:33:37 -0700
-Subject: [PATCH 43/85] vulkan: CPU readback of GPU resolves under resolution
+Subject: [PATCH 43/86] vulkan: CPU readback of GPU resolves under resolution
  scaling (upscaling blocker)
 
 ReadbackGpuWrittenRange refused when draw resolution scaling was on, so the

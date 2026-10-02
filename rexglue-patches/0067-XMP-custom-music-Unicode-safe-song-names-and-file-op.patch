@@ -1,7 +1,7 @@
 From a19db2cb5f0a485499cd0750331752ee2f97375f Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 29 Sep 2026 07:27:38 -0700
-Subject: [PATCH 67/85] XMP custom music: Unicode-safe song names and file
+Subject: [PATCH 67/86] XMP custom music: Unicode-safe song names and file
  opens on Windows (path::string() threw for names outside the ANSI code page,
  e.g. superscript letters -> game crash on opening the entrance editor); _w
  decoder opens + _wfopen for stb_vorbis; folder scan and decode wrapped so a

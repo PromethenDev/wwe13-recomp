@@ -1,7 +1,7 @@
 From b1ac112331ea54ba1d22cd815e0b34977ecd1d62 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 18:31:14 -0700
-Subject: [PATCH 39/85] logging: flush on error (was warn) plus a
+Subject: [PATCH 39/86] logging: flush on error (was warn) plus a
  once-per-second background flush
 
 Every warning forced a disk flush; guest warning bursts (~1000 DLC sound-

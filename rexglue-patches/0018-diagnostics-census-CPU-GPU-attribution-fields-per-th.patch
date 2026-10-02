@@ -1,7 +1,7 @@
 From dafa3a1ca283fb83243915c2673d47a0cd7451b4 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 11:13:16 -0700
-Subject: [PATCH 18/85] diagnostics: census CPU/GPU attribution fields
+Subject: [PATCH 18/86] diagnostics: census CPU/GPU attribution fields
  (per-thread CPU, swap wait, GPU busy)
 
 Adds [rate-census-cpu] per-second lines (top-5 thread CPU%, VdSwap thread

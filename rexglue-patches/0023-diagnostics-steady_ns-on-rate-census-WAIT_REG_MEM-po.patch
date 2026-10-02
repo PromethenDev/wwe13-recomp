@@ -1,7 +1,7 @@
 From 2b6f64160e1071b71a8541d7b9cad213ae99c2f1 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 15:19:05 -0700
-Subject: [PATCH 23/85] diagnostics: steady_ns on [rate-census]; WAIT_REG_MEM
+Subject: [PATCH 23/86] diagnostics: steady_ns on [rate-census]; WAIT_REG_MEM
  poll-iteration census
 
 [rate-census] lines carry steady_ns (steady_clock) so profiler samples can be

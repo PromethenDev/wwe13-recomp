@@ -1,7 +1,7 @@
 From d2e362ff70790cd00281a04d119e41ff1faeb552 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 08:00:06 -0700
-Subject: [PATCH 17/85] graphics: schedule guest vblank on an absolute deadline
+Subject: [PATCH 17/86] graphics: schedule guest vblank on an absolute deadline
  (59/s -> 60/s)
 
 The vsync worker reset its baseline to the late 1 ms poll time, so every

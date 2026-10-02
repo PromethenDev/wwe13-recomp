@@ -1,7 +1,7 @@
 From aef26073dd13a92092465ea17998300616982173 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 05:24:49 -0700
-Subject: [PATCH 15/85] audio: build SDL's disk audio driver for headless
+Subject: [PATCH 15/86] audio: build SDL's disk audio driver for headless
  capture
 
 Enables SDL_DISKAUDIO so SDL_AUDIODRIVER=disk can record the mixed guest

@@ -126,6 +126,12 @@ class Wwe13App : public rex::ReXApp {
   }
 
   void OnPreLaunchModule() override {
+    // Owner 2026-10-02: the mouse pointer hides after 4 s without mouse movement (shown again when the mouse moves
+    // or clicks), in fullscreen and windowed. Runs on the UI thread once the window is open (OnPostSetup is too
+    // early: the window does not exist yet). WWE13_SHOW_CURSOR=1 keeps it always visible.
+    if (auto* w = window(); w && !EnvIsOne("WWE13_SHOW_CURSOR")) {
+      w->SetCursorVisibility(rex::ui::Window::CursorVisibility::kAutoHidden);
+    }
     if (game_file_check_result_ == wwe13::GameFileCheckResult::kSupported) {
       return;
     }

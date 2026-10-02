@@ -1,7 +1,7 @@
 From 88ddcb0278bf18a85e9fada0842e906f3faecbd7 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 18:55:25 -0700
-Subject: [PATCH 49/85] vulkan: per-draw CPU cost - sampler parameter/usage
+Subject: [PATCH 49/86] vulkan: per-draw CPU cost - sampler parameter/usage
  memos and a 16-entry texture descriptor set cache
 
 Live draw-stage timing (Linux, keep-60 entrances, rdtsc per IssueDraw stage): ~1050 ns/draw; bindings 258,

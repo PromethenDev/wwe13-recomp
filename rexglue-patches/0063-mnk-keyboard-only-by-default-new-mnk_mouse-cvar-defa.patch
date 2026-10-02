@@ -1,7 +1,7 @@
 From aded2273ef9e281b8c258ec7be0b23b32ebe59d3 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Mon, 28 Sep 2026 18:56:04 -0700
-Subject: [PATCH 63/85] mnk: keyboard-only by default - new mnk_mouse cvar
+Subject: [PATCH 63/86] mnk: keyboard-only by default - new mnk_mouse cvar
  (default off) gates cursor capture/hide/re-centre and mouse input; right
  stick on I/J/K/L, LT=Z, RT=Control, RS press=M (no mouse defaults)
 

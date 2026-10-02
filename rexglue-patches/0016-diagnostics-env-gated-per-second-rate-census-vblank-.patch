@@ -1,7 +1,7 @@
 From 3d9bf9ca961ba700f77fdbdbbbb0f496de3cd46a Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 07:04:39 -0700
-Subject: [PATCH 16/85] diagnostics: env-gated per-second rate census (vblank,
+Subject: [PATCH 16/86] diagnostics: env-gated per-second rate census (vblank,
  irq, VdSwap, present, guest clock)
 
 WWE13_RATE_CENSUS=1 logs one [rate-census] line per wall second. Off by

@@ -1,7 +1,7 @@
 From 6284452633bf549e505e6a9eb43eb5ed476b61f3 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 1 Oct 2026 02:20:00 -0700
-Subject: [PATCH 78/85] UI c0 remap: scene-sized-texture skip only for scenes
+Subject: [PATCH 78/86] UI c0 remap: scene-sized-texture skip only for scenes
  smaller than 1280x720 (WWE13 1080p pause dimming)
 
 The BUG-7 skip (0b16376) is right for the real 480p/576p modes, whose full-screen scene copies are laid out in

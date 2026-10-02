@@ -1,7 +1,7 @@
 From 415a408af1ec6b8a02127af9cfabfcbf4a830896 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sun, 27 Sep 2026 15:35:54 -0700
-Subject: [PATCH 57/85] kernel: W5 stub audit - device info reports
+Subject: [PATCH 57/86] kernel: W5 stub audit - device info reports
  FILE_DEVICE_DISK; XCTD keeps INVALID_PARAMETER with caller diagnostics;
  XNetLogonGetTitleID and XAM message dispatch log caller once
 

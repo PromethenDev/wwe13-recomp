@@ -1,7 +1,7 @@
 From 0c291154c66d9eecc73576c1569df14803ea2a49 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sun, 27 Sep 2026 22:40:24 -0700
-Subject: [PATCH 59/85] graphics: opt-in WWE13_NO_MSAA=1 probe - main-scene
+Subject: [PATCH 59/86] graphics: opt-in WWE13_NO_MSAA=1 probe - main-scene
  RB_SURFACE_INFO 0x05020140 written without its 4x MSAA bits (default off,
  logged once)
 

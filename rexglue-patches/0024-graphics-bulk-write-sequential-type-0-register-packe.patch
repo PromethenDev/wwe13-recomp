@@ -1,7 +1,7 @@
 From 1ecfa21bb0d0e8ba723e4ea226330e4591199b21 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 16:21:09 -0700
-Subject: [PATCH 24/85] graphics: bulk-write sequential type-0 register packets
+Subject: [PATCH 24/86] graphics: bulk-write sequential type-0 register packets
 
 ExecutePacketType0 called the virtual WriteRegister once per dword, even for
 long sequential runs of shader constants. Sequential packets now go through

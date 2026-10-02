@@ -1,7 +1,7 @@
 From 151f8ec90d1130e4b8bfe59c4eaa496dc96f306b Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 22:23:27 -0700
-Subject: [PATCH 27/85] diagnostics: REX_DUMP_PATCHED_IMAGE dumps the XEX image
+Subject: [PATCH 27/86] diagnostics: REX_DUMP_PATCHED_IMAGE dumps the XEX image
  after a title-update patch
 
 Used to compare the WWE '13 title update image with the base image offline

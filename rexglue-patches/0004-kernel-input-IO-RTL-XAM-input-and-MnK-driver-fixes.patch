@@ -1,7 +1,7 @@
 From 6022f40216c886474c51dd01ebda4ef6d5226ec0 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 12:48:59 -0700
-Subject: [PATCH 04/85] kernel/input: IO, RTL, XAM input and MnK driver fixes
+Subject: [PATCH 04/86] kernel/input: IO, RTL, XAM input and MnK driver fixes
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

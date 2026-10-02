@@ -1,7 +1,7 @@
 From 621753c702fb9b61376e70f6c71ef1ea340d22cb Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sun, 27 Sep 2026 15:32:50 -0700
-Subject: [PATCH 56/85] system: optional host-backed utility drive
+Subject: [PATCH 56/86] system: optional host-backed utility drive
  (--mount_cache, default off) for the title's cache: partition
 
 Mounts <user_data_root>/cache_drive as \Device\Harddisk0\Cache0 = cache: when enabled; reports real host free space.

@@ -1,7 +1,7 @@
 From a62c013e516702c204d8aa774f386b873aff9f02 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 17:23:00 -0700
-Subject: [PATCH 08/85] graphics/ui: build the trace player and add
+Subject: [PATCH 08/86] graphics/ui: build the trace player and add
  --replay_trace
 
 Compiles trace_reader.cpp and trace_player.cpp (fixing a malformed snappy

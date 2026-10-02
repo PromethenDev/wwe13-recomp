@@ -1,7 +1,7 @@
 From d3f13bf6a50dd953bbd0e6728ee179090af854ee Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 19:15:42 -0700
-Subject: [PATCH 25/85] vulkan: reuse unchanged texture descriptor sets across
+Subject: [PATCH 25/86] vulkan: reuse unchanged texture descriptor sets across
  draws
 
 UpdateBindings invalidated both texture descriptor sets on every draw (upstream

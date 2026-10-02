@@ -1,7 +1,7 @@
 From 8aac55421508046560221ec15096117cba778892 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Wed, 30 Sep 2026 15:49:52 -0700
-Subject: [PATCH 72/85] Vulkan: draw-time UI constant/scissor remap for reduced
+Subject: [PATCH 72/86] Vulkan: draw-time UI constant/scissor remap for reduced
  internal resolutions (WWE13 480p/576p menus)
 
 Configured by the game (vertex-shader ucode hashes + from/to c0 pair + scene size); inactive when unset.

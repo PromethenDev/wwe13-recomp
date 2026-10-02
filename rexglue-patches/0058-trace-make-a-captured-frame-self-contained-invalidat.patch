@@ -1,7 +1,7 @@
 From 7a2b7c6912b7c37c21ba5ab9884f5b7386943e19 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sun, 27 Sep 2026 19:06:55 -0700
-Subject: [PATCH 58/85] trace: make a captured frame self-contained (invalidate
+Subject: [PATCH 58/86] trace: make a captured frame self-contained (invalidate
  texture/buffer caches when a trace opens)
 
 F9 traces recorded memory only for textures/buffers (re)loaded during the captured frame; everything uploaded earlier

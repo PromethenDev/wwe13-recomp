@@ -1,7 +1,7 @@
 From 591170195331a86febb91f28a3f93bf13cee5100 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Mon, 28 Sep 2026 10:25:09 -0700
-Subject: [PATCH 60/85] debug_ui cvar (default off): gate built-in overlays, F9
+Subject: [PATCH 60/86] debug_ui cvar (default off): gate built-in overlays, F9
  trace, console log capture and the Windows console; player-visible window
  title via GetWindowTitle()
 

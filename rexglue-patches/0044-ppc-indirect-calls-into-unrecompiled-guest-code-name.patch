@@ -1,7 +1,7 @@
 From ec8e27008c77439897c3078f48d5a5501cb8d63d Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 07:15:16 -0700
-Subject: [PATCH 44/85] ppc: indirect calls into unrecompiled guest code name
+Subject: [PATCH 44/86] ppc: indirect calls into unrecompiled guest code name
  themselves
 
 PPC_CALL_INDIRECT_FUNC: an empty function-table entry now goes to a cold

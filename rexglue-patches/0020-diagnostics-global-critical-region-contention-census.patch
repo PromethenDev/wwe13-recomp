@@ -1,7 +1,7 @@
 From c1e563fce5c2f12f00bd4cb294130fe791155467 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 13:05:39 -0700
-Subject: [PATCH 20/85] diagnostics: global critical region contention census
+Subject: [PATCH 20/86] diagnostics: global critical region contention census
  with owner sampling
 
 When WWE13_RATE_CENSUS=1, global_critical_region::Acquire/AcquireDirect try
