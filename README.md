@@ -12,9 +12,16 @@ You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game fil
 - **Title update 2.0.1.0** (`default.xexp` and its data files). It is required: the recompilation was built from the updated game, so the game refuses to start without it and tells you why.
 - **DLC packs** are optional.
 
+## What you need
+
+- **Windows 10 or 11 (64-bit)**, or **Linux** (glibc 2.38 or newer, e.g. Ubuntu 24.04, with GTK3; on Wayland the game window runs through XWayland, installed by default on most distributions).
+- **CPU**: a 64-bit processor with AVX2 (most PCs from 2013 onward: Intel Haswell / AMD Ryzen or newer).
+- **Graphics**: a graphics card with up-to-date Vulkan drivers. On integrated graphics, choose 480p.
+- About 10 GB of free space for the game files.
+
 ## Install and play
 
-1. Download and extract the release ZIP.
+1. Download `WWE13-Recomp-v1.0.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
 2. Start **`WWE13 Launcher.exe`** (Linux: `Linux-x86_64/wwe13-launcher`).
 3. In **Game files**, do one of the following:
    - put your game folder in the `WWE 13` folder beside the launcher, or
@@ -25,20 +32,24 @@ You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game fil
 
 The launcher checks every file and shows **Game files ready** when everything is correct.
 
-Backup ways to start: `wwe13-enhanced.exe` (the previous launcher) or `wwe13.bat` (starts the game directly). If you are asked for a bug report, start the game with `wwe13-debug.bat`: it writes detailed logs to the `logs` folder.
+Backup ways to start: `wwe13-enhanced.exe` (the previous launcher) or `wwe13.bat` (starts the game directly).
 
 ```text
-WWE13-Recomp/
+WWE13-Recomp-x64/
 ├── WWE13 Launcher.exe          # start here (Windows)
 ├── wwe13.exe                   # the game (started by the launcher)
+├── wwe13.toml                  # keyboard keys (change them on the launcher's Controls page)
 ├── wwe13-enhanced.exe          # previous launcher (backup)
 ├── wwe13.bat                   # backup: start the game directly (Classic settings)
-├── wwe13-debug.bat             # for bug reports: writes diagnostic logs to logs/
+├── wwe13-debug.bat             # extra diagnostic logs, only if asked for them in a bug report
 ├── avcodec-58.dll, avutil-56.dll
+├── shader-cache/               # pre-built graphics data so the game starts quickly
 ├── Linux-x86_64/               # Linux launcher + game
-├── README.md, DISCLAIMER.md, LICENSE
+├── README.md, DISCLAIMER.md, LICENSE, SHA256SUMS
+├── licenses/, third-party-licenses/, ffmpeg-source-*.zip
+├── WWE 13/                     # your game folder (default.xex + default.xexp + data)
 ├── userdata/                   # saves, DLC and settings (created on first run)
-└── WWE 13/                     # your game folder (default.xex + default.xexp + data)
+└── logs/                       # game logs (created on first run)
 ```
 
 ## Launcher settings
@@ -50,7 +61,7 @@ WWE13-Recomp/
 - **Display** – fullscreen or windowed (press **F11** in the game to switch at any time); **Graphics card** – for PCs with two GPUs.
 - **Start straight away next time** – skip the launcher on later starts. Hold **Shift** while it starts to come back to the settings.
 - **Music** – drop your own songs in to use them in the game's custom music.
-- **Save backups** – back up and restore your saves with one click.
+- **Saves** – **Back Up Now** and **Restore** your saves with one click.
 
 ## Controls
 
@@ -58,19 +69,21 @@ An Xbox-compatible controller is recommended. The keyboard also works as a contr
 
 ## Saves and DLC
 
-The game keeps saves, DLC and settings in `userdata/` beside the launcher. It is local to this installation; use **Save backups** in the launcher (or copy the folder) before moving or replacing a release.
+The game keeps saves, DLC and settings in `userdata/` beside the launcher. It is local to this installation; use **Back Up Now** on the launcher's **Saves** page (or copy the folder) before moving or replacing a release.
 
 ## Known issues
 
 - **1080p** is hidden in the launcher for now: at that resolution the crowd can show glitches.
 - Some shadow and lighting differences remain compared to the console.
-- **CPU**: a 64-bit processor with AVX2 (most PCs from 2013 onward: Intel Haswell / AMD Ryzen or newer).
-- **Linux**: the included build needs a recent distribution (glibc 2.38 or newer, e.g. Ubuntu 24.04) and GTK3. On Wayland desktops the game window runs through XWayland (installed by default on most distributions).
 - **480p**: the reversal button prompt that appears over a wrestler is drawn too far up and to the left. 720p and higher are not affected.
 - **60 Everywhere**: entrances and cutscenes run in slow motion whenever your graphics card cannot keep 60 fps, because the game's timing follows the frame rate. Use **Classic** (the default) if that happens.
-- Extract the release to a normal folder such as Documents or Desktop, not `C:\Program Files` (the launcher keeps your saves and settings next to itself and warns you if the folder is read-only).
+- Extract the release to a normal folder, not `C:\Program Files`: the launcher keeps your saves and settings next to itself (it warns you if the folder is read-only).
 - Only the exact title update 2.0.1.0 is supported; other regions, game revisions or title updates are refused.
-- If the game crashes, `wwe13.log` next to the game ends with a crash report. Please attach that log to a bug report; it tells us exactly where it happened.
+- In menus, the modern keyboard keys confirm with **L** and go back with **K** (they follow the controller's A and B buttons).
+
+## Reporting bugs
+
+Press **Save a Bug Report (logs + settings)** at the bottom of the launcher. It saves a `wwe13-bug-report-<date>.zip` next to the launcher with the latest game logs, your launcher settings and basic PC information (graphics card, system); no game files or saves. Attach it to a new issue on this repository's **Issues** page and describe what happened. If the game crashed, its log ends with a crash report that shows exactly where.
 
 ## Building from source
 
