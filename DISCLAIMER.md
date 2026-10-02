@@ -14,10 +14,11 @@ you must own a legally obtained Xbox 360 copy of WWE '13 and supply your
 own supported title-update 2.0.1.0 files. Do not redistribute game files
 or content from your copy.
 
-The Windows executable is a static recompilation derived from the game's
-executable code. The required game data remains user-supplied. Neither this
-notice nor the repository's pending software-license decision grants rights
-to the original game, its code, assets, or trademarks.
+The Windows and Linux executables are a static recompilation derived from
+the game's executable code. The required game data remains user-supplied.
+Neither this notice nor this project's BSD 3-Clause license (which covers
+only this project's own code) grants rights to the original game, its code,
+assets, or trademarks.
 
 The software is provided “AS IS”, without warranties or guarantees of
 compatibility, performance, or fitness for a particular purpose, to the
