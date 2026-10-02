@@ -1,0 +1,61 @@
+
+[[midasm_hook]]
+address = 0x82AC294C  # base 0x82AC0174 (shift)
+name = "dlist_tripwire_begin"
+registers = ["r4", "r5", "r13"]
+
+[[midasm_hook]]
+address = 0x82AC2BF0  # base 0x82AC0418 (shift)
+name = "dlist_tripwire_begin"
+registers = ["r4", "r5", "r13"]
+
+[[midasm_hook]]
+address = 0x82AC2CFC  # base 0x82AC0524 (shift)
+name = "dlist_tripwire_begin"
+registers = ["r4", "r5", "r13"]
+
+[[midasm_hook]]
+address = 0x82AC1E0C  # base 0x82ABF634 (shift)
+name = "dlist_tripwire_begin"
+registers = ["r4", "r5", "r13"]
+
+[[midasm_hook]]
+address = 0x82AA4458  # base 0x82AA1B88 (shift)
+name = "dlist_tripwire_end"
+registers = ["r31", "r13"]
+
+[[midasm_hook]]
+address = 0x82ADBFDC  # base 0x82AD9804 (shift)
+name = "dlist_tripwire_bail"
+registers = ["r11", "r26", "r1", "r13"]
+
+[[midasm_hook]]
+address = 0x82AC2B14  # base 0x82AC033C (shift)
+name = "dlist_tripwire_call"
+registers = ["r4", "r25", "r13"]
+
+[[midasm_hook]]
+address = 0x82AC2C24  # base 0x82AC044C (shift)
+name = "dlist_tripwire_call"
+registers = ["r4", "r31", "r13"]
+
+[[midasm_hook]]
+address = 0x82AC2E50  # base 0x82AC0678 (shift)
+name = "dlist_tripwire_call"
+registers = ["r4", "r25", "r13"]
+
+[[midasm_hook]]
+address = 0x82AC2848  # base 0x82AC0070 (shift)
+name = "dlist_tripwire_call"
+registers = ["r4", "r19", "r13"]
+
+[[midasm_hook]]
+address = 0x82AA4E64  # base 0x82AA2594 (shift)
+name = "dlist_call_guard"
+registers = ["r3", "r13"]
+jump_address_on_true = 0x82AA4E68  # base 0x82AA2598 (shift, semantic match)
+
+[[midasm_hook]]
+address = 0x82BE19E8
+name = "wwe13_untile_coherency"
+registers = ["r6", "r7", "r8", "r10"]

@@ -1,0 +1,20 @@
+# Your own game files and everything derived from them - never commit these.
+game/
+generated/
+*.xex
+*.xexp
+*.iso
+# Build output
+out/
+build/
+# Local settings / caches
+wwe13.toml
+*.log
+*.arc
+*.pac
+*.pck
+*.bik
+*.bik2
+*.xtr
+compile_commands.json
+CMakeUserPresets.json

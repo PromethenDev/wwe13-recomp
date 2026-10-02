@@ -1,0 +1,5 @@
+project_name = "wwe13"
+file_path = "game/default.xex"
+out_directory_path = "generated"
+
+includes = ["config/functions.toml", "config/hooks.toml"]
