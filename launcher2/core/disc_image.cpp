@@ -133,8 +133,23 @@ Result ExtractDiscImage(const fs::path& iso, const fs::path& dest_folder,
     }
 
     std::error_code filesystem_error;
+    // The release ships an (almost) empty "WWE 13" folder, and players may drop the ISO itself, the title update or
+    // DLC files into it. Extracting into it is fine as long as it holds no game yet and nothing on the disc would
+    // overwrite a file that is already there; the extracted files are moved in next to what is there.
+    bool merge_into_existing = false;
     if (fs::exists(dest_folder, filesystem_error) || filesystem_error) {
-      return Result::Fail("A folder with this name already exists.");
+      if (filesystem_error || !fs::is_directory(dest_folder, filesystem_error)) {
+        return Result::Fail("A file with the game folder's name is in the way.");
+      }
+      if (fs::exists(dest_folder / "default.xex", filesystem_error)) {
+        return Result::Fail("The game folder already contains a game. Choose that folder instead, or empty it first.");
+      }
+      for (const auto& entry : reader.root_entries()) {
+        if (fs::exists(dest_folder / entry.relative_path, filesystem_error)) {
+          return Result::Fail("The game folder already contains files from the disc. Empty it first.");
+        }
+      }
+      merge_into_existing = true;
     }
     fs::path parent = dest_folder.parent_path();
     if (parent.empty()) {
@@ -224,10 +239,29 @@ Result ExtractDiscImage(const fs::path& iso, const fs::path& dest_folder,
       return fail("The extraction was cancelled.");
     }
     filesystem_error.clear();
-    fs::rename(partial, dest_folder, filesystem_error);
-    if (filesystem_error) {
-      return fail("The extracted game folder could not be installed.");
+    if (!merge_into_existing) {
+      fs::rename(partial, dest_folder, filesystem_error);
+      if (filesystem_error) {
+        return fail("The extracted game folder could not be installed.");
+      }
+      partial_created = false;
+      return Result::Ok();
     }
+    // Move every top-level extracted entry into the existing folder (same drive: renames, no copying).
+    std::vector<fs::path> moved;
+    for (const auto& entry : fs::directory_iterator(partial)) {
+      const fs::path target = dest_folder / entry.path().filename();
+      fs::rename(entry.path(), target, filesystem_error);
+      if (filesystem_error) {
+        for (const auto& done : moved) {  // undo, so a retry starts from the same state
+          std::error_code ignored;
+          fs::rename(done, partial / done.filename(), ignored);
+        }
+        return fail("The extracted game files could not be moved into the game folder.");
+      }
+      moved.push_back(target);
+    }
+    RemovePartial(partial);
     partial_created = false;
     return Result::Ok();
   } catch (const std::exception&) {

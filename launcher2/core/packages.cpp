@@ -1,5 +1,7 @@
 #include "launcher_core.h"
 
+#include <cctype>
+
 #include "internal/stfs.h"
 
 #include <algorithm>
@@ -704,6 +706,38 @@ std::optional<PackageInfo> InspectPackage(const fs::path& package_or_folder) {
   } catch (...) {
     return std::nullopt;
   }
+}
+
+FolderInstallables FindInstallableFiles(const fs::path& folder) {
+  FolderInstallables found;
+  try {
+    std::error_code error;
+    if (!fs::is_directory(folder, error)) return found;
+    for (fs::directory_iterator it(folder, error), end; !error && it != end; it.increment(error)) {
+      const fs::path path = it->path();
+      if (!it->is_regular_file(error)) continue;
+      std::string extension = path.extension().string();
+      std::transform(extension.begin(), extension.end(), extension.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (extension == ".iso" || extension == ".img") {
+        found.disc_images.push_back(path);
+        continue;
+      }
+      if (extension == ".txt" || extension == ".xex" || extension == ".xexp" || extension == ".def" ||
+          extension == ".arc") {
+        continue;
+      }
+      const std::optional<PackageInfo> package = InspectPackage(path);
+      if (package && package->title_id == 0x545108B4 && package->kind != PackageKind::kUnknown) {
+        found.packages.push_back(path);
+        found.has_title_update = found.has_title_update || package->kind == PackageKind::kTitleUpdate;
+      }
+    }
+  } catch (...) {
+  }
+  std::sort(found.disc_images.begin(), found.disc_images.end());
+  std::sort(found.packages.begin(), found.packages.end());
+  return found;
 }
 
 Result ImportPackage(const fs::path& package_or_folder, const Paths& paths,

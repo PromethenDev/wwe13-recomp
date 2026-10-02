@@ -288,6 +288,30 @@ int main(int argc, char** argv) {
       fs::remove(image, ignored);
     }
 
+    // Release layout: the ISO sits inside the existing "WWE 13" folder next to the placeholder note. Extraction
+    // fills that folder (keeping both files) and the folder shows up as a game in FindInstallableFiles first.
+    {
+      const fs::path game_folder = output / "WWE 13";
+      fs::create_directories(game_folder);
+      { std::ofstream note(game_folder / "PUT-GAME-FILES-HERE.txt"); note << "note"; }
+      const fs::path inside_image = game_folder / "WWE 13.iso";
+      BuildImage(inside_image, 0x02080000, files);
+      const FolderInstallables found = FindInstallableFiles(game_folder);
+      Check(found.disc_images.size() == 1 && found.disc_images[0] == inside_image && found.packages.empty(),
+            "the ISO in the game folder was not found");
+      CancelFlag cancel{false};
+      const Result merged = ExtractDiscImage(inside_image, game_folder, nullptr, cancel);
+      Check(merged.ok, "extracting into the existing game folder failed: " + merged.error);
+      for (const auto& file : files) Check(fs::exists(game_folder / file.first), "an extracted file is missing");
+      Check(fs::exists(game_folder / "PUT-GAME-FILES-HERE.txt") && fs::exists(inside_image),
+            "files already in the game folder were removed");
+      Check(!fs::exists(fs::path(game_folder.string() + ".partial")), "the extraction stage was left behind");
+      // A folder that already holds a game is never extracted into.
+      const Result again = ExtractDiscImage(inside_image, game_folder, nullptr, cancel);
+      Check(!again.ok, "extracting over an existing game was allowed");
+      fs::remove_all(game_folder, ignored);
+    }
+
     const fs::path wrong_xex_image = output / "wrong-title.iso";
     auto wrong_xex = xex;
     const uint32_t header_size = (static_cast<uint32_t>(wrong_xex[8]) << 24) |
@@ -364,7 +388,7 @@ int main(int argc, char** argv) {
           "Games-on-Demand folder was not clearly reported as unsupported");
 
     fs::remove_all(output, ignored);
-    std::cout << "disc_image_test: PASS (plain/XGD3/XGD2 byte compare; wrong title, unsafe path, cancellation, invalid image, GoD folder)\n";
+    std::cout << "disc_image_test: PASS (plain/XGD3/XGD2 byte compare; ISO inside the WWE 13 folder; wrong title, unsafe path, cancellation, invalid image, GoD folder)\n";
     return 0;
   } catch (const std::exception& error) {
     std::cerr << "disc_image_test: FAIL: " << error.what() << '\n';

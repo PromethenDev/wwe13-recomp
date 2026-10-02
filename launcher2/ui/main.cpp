@@ -125,6 +125,8 @@ struct AppState {
   std::vector<Song> songs;
   std::vector<BackupInfo> backups;
   KeyboardControls controls = DefaultKeyboardControls();
+  bool scroll_to_candidates = false;
+  FolderInstallables folder_installables;  // ISO / TU / DLC files dropped into the "WWE 13" folder  // Game files: bring the "folders found" list into view once
   int capture_index = -1;  // Controls row waiting for a key press, -1 = none
   std::string controls_status;
   bool controls_status_ok = true;
@@ -320,6 +322,8 @@ void BeginJob(AppState& app, std::string label, JobTask task) {
   });
 }
 
+void RefreshFolderInstallables(AppState& app);
+
 void PollJob(AppState& app) {
   std::function<void()> apply;
   Result result;
@@ -341,6 +345,7 @@ void PollJob(AppState& app) {
   } else {
     if (apply) apply();
   }
+  if (app.initialized) RefreshFolderInstallables(app);
   if (app.drop_wait_notice_pending) {
     app.drop_wait_notice_pending = false;
     SetBanner(app, kDropWaitMessage);
@@ -466,6 +471,11 @@ void StartInitialization(AppState& app) {
                          app.backups = backups;
                          app.controls = controls;
                          app.initialized = true;
+                         RefreshFolderInstallables(app);
+                         if (!app.game_files.ready() && (!app.folder_installables.disc_images.empty() ||
+                                                         !app.folder_installables.packages.empty())) {
+                           app.tab = Tab::GameFiles;
+                         }
                          if (reset_hidden_1080p && !settings_save.ok) {
                            SetBanner(app, settings_save.error);
                          }
@@ -535,6 +545,8 @@ void StartChooseGameFolder(AppState& app, const fs::path& folder) {
                         app.game_files = status;
                         app.settings = settings;
                         app.settings.game_folder = status.game_folder.empty() ? settings.game_folder : status.game_folder;
+                        SetBanner(app, status.ready() ? "Game files ready." : "Folder checked - see the rows below.",
+                                  status.ready());
                       }};
   });
 }
@@ -580,10 +592,22 @@ void StartFindGameFiles(AppState& app) {
     std::vector<FoundGame> candidates = FindGameFiles(paths, progress, cancel);
     return JobOutcome{Result::Ok(), [&app, candidates = std::move(candidates)]() mutable {
                         app.candidates = std::move(candidates);
+                        app.scroll_to_candidates = !app.candidates.empty();
                         if (app.candidates.empty()) SetBanner(app, "No WWE '13 folder was found. Choose a folder to check.");
                         else SetBanner(app, "Choose a verified game folder below.", true);
                       }};
   });
+}
+
+// Looks in the "WWE 13" folder next to the launcher for a disc image, title update or DLC files a player copied
+// there, so the Game files page can offer to install them (the README tells players to put files in that folder).
+void RefreshFolderInstallables(AppState& app) {
+  app.folder_installables = FolderInstallables{};
+  if (app.paths.default_game_folder.empty()) return;
+  const bool needs_base = app.game_files.base_game != FileState::kFound;
+  const bool needs_more = app.game_files.title_update != FileState::kFound ||
+                          app.game_files.dlc_installed < app.game_files.dlc_known;
+  if (needs_base || needs_more) app.folder_installables = FindInstallableFiles(app.paths.default_game_folder);
 }
 
 void StartExtractDisc(AppState& app, fs::path image) {
@@ -1400,9 +1424,20 @@ void DrawProgress(AppState& app) {
     const double rate = elapsed > 0.05 ? static_cast<double>(done) / elapsed : 0.0;
     const double eta = rate > 0.0 && total > done ? static_cast<double>(total - done) / rate : 0.0;
     ImGui::PushFont(app.fonts.barlow_small);
-    ImGui::TextColored(kMuted, "%llu / %llu bytes  ·  %s",
-                       static_cast<unsigned long long>(done), static_cast<unsigned long long>(total),
-                       eta > 0.0 ? ("about " + std::to_string(static_cast<int>(eta)) + " sec left").c_str() : "finishing up");
+    // Totals are bytes for copies/extractions (shown as MB/GB) and item counts otherwise.
+    auto size_text = [](uint64_t value) {
+      char text[32];
+      if (value >= (1ull << 30)) std::snprintf(text, sizeof(text), "%.1f GB", static_cast<double>(value) / (1ull << 30));
+      else std::snprintf(text, sizeof(text), "%.0f MB", static_cast<double>(value) / (1ull << 20));
+      return std::string(text);
+    };
+    const std::string amount = total >= (1ull << 20) ? size_text(done) + " of " + size_text(total)
+                                                     : std::to_string(done) + " of " + std::to_string(total);
+    const std::string remaining =
+        eta > 0.0 ? (eta >= 90.0 ? "about " + std::to_string(static_cast<int>(eta / 60.0 + 0.5)) + " min left"
+                                 : "about " + std::to_string(static_cast<int>(eta)) + " sec left")
+                  : "finishing up";
+    ImGui::TextColored(kMuted, "%s  ·  %s", amount.c_str(), remaining.c_str());
     ImGui::PopFont();
   } else {
     ImGui::PushFont(app.fonts.barlow_small);
@@ -1414,7 +1449,47 @@ void DrawProgress(AppState& app) {
   ImGui::PopStyleColor();
 }
 
+void DrawFolderInstallables(AppState& app) {
+  const FolderInstallables& found = app.folder_installables;
+  const bool offer_disc = app.game_files.base_game != FileState::kFound && !found.disc_images.empty();
+  const bool offer_packages = !offer_disc && app.game_files.base_game == FileState::kFound && !found.packages.empty() &&
+                              ((found.has_title_update && app.game_files.title_update != FileState::kFound) ||
+                               app.game_files.dlc_installed < app.game_files.dlc_known);
+  if (!offer_disc && !offer_packages) return;
+  const std::string text =
+      offer_disc ? "Found " + PathUtf8(found.disc_images.front().filename()) + " in your WWE 13 folder."
+                 : "Found " + std::to_string(found.packages.size()) +
+                       (found.packages.size() == 1 ? " update or DLC file" : " update / DLC files") +
+                       " in your WWE 13 folder.";
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.20f, 0.14f, 1.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(app, 9.0f));
+  ImGui::BeginChild("folder-installables", ImVec2(0, S(app, 58.0f)), false,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::SetCursorPos(S(app, 14.0f, 17.0f));
+  ImGui::PushFont(app.fonts.barlow_semibold);
+  ImGui::TextColored(kSuccess, "%s", text.c_str());
+  ImGui::PopFont();
+  const float button_width = S(app, 150.0f);
+  ImGui::SetCursorPos(ImVec2(ImGui::GetWindowWidth() - button_width - S(app, 12.0f), S(app, 11.0f)));
+  if (AccentButton(app, offer_disc ? "Extract It" : "Install", ImVec2(button_width, S(app, 36.0f)))) {
+    if (offer_disc) StartExtractDisc(app, found.disc_images.front());
+    else StartImportPackages(app, found.packages);
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+  ImGui::Spacing();
+}
+
 void DrawGameFiles(AppState& app) {
+  // While something is being installed, its progress goes at the top (always visible) and the install offers hide.
+  const bool busy = app.job.active.load();
+  if (busy) {
+    DrawProgress(app);
+    ImGui::Spacing();
+  } else {
+    DrawFolderInstallables(app);
+  }
   const char* base_hint = app.game_files.base_game == FileState::kFound
                               ? "Base game files are in the selected folder."
                               : "Use Find Automatically or Choose a Folder with the base game.";
@@ -1498,7 +1573,10 @@ void DrawGameFiles(AppState& app) {
 
   if (!app.candidates.empty()) {
     ImGui::Spacing();
-    if (BeginPanel(app, "found-game-candidates", ImVec2(0, S(app, 118.0f)))) {
+    // Tall enough for every folder found (one row each), so none is cut off; the page scrolls if needed.
+    const float candidates_height =
+        S(app, 48.0f) + static_cast<float>(app.candidates.size()) * (ImGui::GetFrameHeightWithSpacing() + S(app, 2.0f));
+    if (BeginPanel(app, "found-game-candidates", ImVec2(0, candidates_height))) {
       ImGui::TextUnformatted("FOLDERS FOUND");
       for (size_t i = 0; i < app.candidates.size(); ++i) {
         ImGui::Text("%s", PathUtf8(app.candidates[i].folder).c_str());
@@ -1508,8 +1586,11 @@ void DrawGameFiles(AppState& app) {
       }
     }
     EndPanel();
+    if (app.scroll_to_candidates) {
+      ImGui::SetScrollHereY(1.0f);
+      app.scroll_to_candidates = false;
+    }
   }
-  DrawProgress(app);
 }
 
 std::string FriendlyDate(const std::string& iso) {
@@ -1931,9 +2012,10 @@ void DrawMain(AppState& app) {
   ImGui::Spacing();
   DrawBanner(app);
   const float footer_space = ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - S(app, 52.0f);
+  // Pages scroll when their content is taller than the window (e.g. Game files with a banner and found folders on
+  // a small or scaled-down window); the scrollbar only appears when needed.
   ImGui::BeginChild("active-page", ImVec2(0, std::max(footer_space, S(app, 100.0f))), false,
-                    ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar |
-                        ImGuiWindowFlags_NoScrollWithMouse);
+                    ImGuiWindowFlags_NoBackground);
   if (app.tab != Tab::Controls) app.capture_index = -1;  // leaving the page cancels a pending key capture
   switch (app.tab) {
     case Tab::Play: DrawPlay(app); break;

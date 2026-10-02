@@ -121,6 +121,14 @@ struct PackageInfo {
   uint32_t title_id = 0;
 };
 std::optional<PackageInfo> InspectPackage(const fs::path& package_or_folder);
+// Installable files a player dropped into a game folder (top level only): disc images (.iso/.img) and WWE '13
+// title-update / DLC package files. Never throws; unreadable entries are skipped.
+struct FolderInstallables {
+  std::vector<fs::path> disc_images;
+  std::vector<fs::path> packages;
+  bool has_title_update = false;
+};
+FolderInstallables FindInstallableFiles(const fs::path& folder);
 Result ImportPackage(const fs::path& package_or_folder, const Paths& paths, const fs::path& game_folder,
                      const ProgressFn& progress, const CancelFlag& cancel);
 
