@@ -1,7 +1,7 @@
 From a1ffe32dcca9dd7512434027d740ced35cc58bb8 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 2 Oct 2026 07:18:22 -0700
-Subject: [PATCH 86/86] Window: cursor auto-hide on Linux (GTK) and a 4 s delay
+Subject: [PATCH 86/89] Window: cursor auto-hide on Linux (GTK) and a 4 s delay
 
 GTKWindow now implements CursorVisibility (kVisible / kHidden / kAutoHidden): in auto-hide the pointer over the game
 area is hidden after kDefaultCursorAutoHideMilliseconds without real mouse movement, clicks or scrolling, and shown

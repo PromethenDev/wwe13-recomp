@@ -8,12 +8,15 @@ if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-get_filename_component(WWE13_REXGLUE_THIRDPARTY
-  "${CMAKE_CURRENT_LIST_DIR}/../../tools/rexglue/thirdparty" ABSOLUTE)
-if(NOT EXISTS "${WWE13_REXGLUE_THIRDPARTY}/sdl3/CMakeLists.txt")
-  # Nested worktrees sit below .worktrees/<name>; use the shared sibling tools directory.
+set(WWE13_REXGLUE_THIRDPARTY "" CACHE PATH "ReXGlue third-party source directory")
+if(NOT WWE13_REXGLUE_THIRDPARTY)
   get_filename_component(WWE13_REXGLUE_THIRDPARTY
-    "${CMAKE_CURRENT_LIST_DIR}/../../../../tools/rexglue/thirdparty" ABSOLUTE)
+    "${CMAKE_CURRENT_LIST_DIR}/../../tools/rexglue/thirdparty" ABSOLUTE)
+  if(NOT EXISTS "${WWE13_REXGLUE_THIRDPARTY}/sdl3/CMakeLists.txt")
+    # Nested worktrees sit below .worktrees/<name>; use the shared sibling tools directory.
+    get_filename_component(WWE13_REXGLUE_THIRDPARTY
+      "${CMAKE_CURRENT_LIST_DIR}/../../../../tools/rexglue/thirdparty" ABSOLUTE)
+  endif()
 endif()
 set(WWE13_SDL3_SOURCE "${WWE13_REXGLUE_THIRDPARTY}/sdl3")
 set(WWE13_IMGUI_SOURCE "${WWE13_REXGLUE_THIRDPARTY}/imgui")

@@ -1,7 +1,7 @@
 From 4604f375651753529baf2162213173fca87dfd8b Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 00:28:05 -0700
-Subject: [PATCH 42/86] kernel: log the unimplemented
+Subject: [PATCH 42/89] kernel: log the unimplemented
  XFileXctdCompressionInformation query once
 
 WWE 13 issues it for thousands of files (log miner: 7,446 lines across sessions;

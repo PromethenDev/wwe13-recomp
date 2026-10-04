@@ -1,7 +1,7 @@
 From 0bbddfb974d1617adab00bf4469347b7637794fd Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 16:29:34 -0700
-Subject: [PATCH 07/86] ui: bind F9 to a single-frame GPU trace
+Subject: [PATCH 07/89] ui: bind F9 to a single-frame GPU trace
 
 Registers bind_gpu_frame_trace (default F9) calling
 GraphicsSystem::RequestFrameTrace(), which was implemented but had no

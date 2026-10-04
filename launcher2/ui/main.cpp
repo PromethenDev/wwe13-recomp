@@ -27,6 +27,7 @@
 #include <functional>
 #include <exception>
 #include <iomanip>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -65,8 +66,9 @@ constexpr char kDropWaitMessage[] = "Please wait until the current task finishes
 constexpr char kReadOnlyFolderMessage[] =
     "This folder is read-only. Move the WWE13-Recomp folder somewhere like Documents or Desktop and start it again.";
 
-enum class Tab { Play, Settings, Controls, Music, GameFiles, Saves };
-enum class DialogKind { None, Music, DiscImage, Package, GameFolder, Backup };
+enum class Tab { Play, Settings, Controls, Content, GameFiles };
+enum class ContentCategory { Superstars, Entrances, Arenas, Logos, Videos, Music, SaveData };
+enum class DialogKind { None, Music, DiscImage, Package, GameFolder, Backup, CreationFiles, CreationFolder, FullSave, Video };
 
 struct JobOutcome {
   Result result = Result::Ok();
@@ -124,7 +126,29 @@ struct AppState {
   std::vector<FoundGame> candidates;
   std::vector<Song> songs;
   std::vector<BackupInfo> backups;
+  std::vector<CreationInfo> creations;
+  std::vector<ContentPack> content_packs;
+  std::vector<TitantronMovie> titantron_movies;
+  std::vector<EntranceVideo> entrance_videos;
+  std::vector<fs::path> pending_creation_paths;
+  std::vector<CreationInfo> pending_creations;
+  std::vector<bool> pending_creation_replacements;
+  std::vector<std::string> pending_creation_skipped;
+  std::string pending_pack_name;
+  std::optional<CreationInfo> pending_full_save_info;
+  fs::path pending_full_save_path;
+  std::string selected_creation;
+  std::string pending_remove_creation;
+  std::string pending_video_stem;
+  std::string pending_remove_pack;
+  bool confirm_replace_creations = false;
+  bool confirm_remove_creation = false;
+  bool confirm_full_save = false;
+  bool confirm_remove_pack = false;
+  bool confirm_restore_backup = false;
   KeyboardControls controls = DefaultKeyboardControls();
+  ContentCategory content_category = ContentCategory::Superstars;
+  std::string creation_sort = "name";  // name | slot | date
   bool scroll_to_candidates = false;
   FolderInstallables folder_installables;  // ISO / TU / DLC files dropped into the "WWE 13" folder  // Game files: bring the "folders found" list into view once
   int capture_index = -1;  // Controls row waiting for a key press, -1 = none
@@ -137,15 +161,19 @@ struct AppState {
   bool shift_at_start = false;
   bool test_shift_held = false;
   bool bypass_auto_start = false;
-  bool screenshot_mode = false;
+  bool screenshot_mode = false;            // any screenshot capture (tabs or content categories)
+  bool screenshot_content_mode = false;    // capture the content categories + remove states (vs. the 5 tabs)
   std::filesystem::path screenshot_dir;
   size_t screenshot_index = 0;
+  fs::path userdata_override;              // test-only --user-data (scratch folder)
   std::vector<fs::path> test_drop_files;
-  Tab test_drop_tab = Tab::Music;
+  Tab test_drop_tab = Tab::Content;
+  fs::path test_import_folder;
   bool imgui_platform_ready = false;
   bool imgui_renderer_ready = false;
-  float display_scale = 1.0f;
+  float display_scale = 1.0f;  // Logical content scale, excluding framebuffer pixel density.
   float fit_scale = 1.0f;
+  float test_pixel_density = 0.0f;  // Screenshot-only simulated high-density framebuffer.
   unsigned int last_fitted_input_event = 0;
   bool test_window_size = false;
   fs::path restore_file;
@@ -158,6 +186,13 @@ struct AppState {
 
 float S(const AppState& app, float pixels) {
   return pixels * app.display_scale;
+}
+
+float GetWindowPixelDensity(const AppState& app) {
+  if (app.screenshot_mode && app.test_pixel_density > 0.0f) {
+    return app.test_pixel_density;
+  }
+  return SDL_GetWindowPixelDensity(app.window);
 }
 
 ImVec2 S(const AppState& app, float x, float y) {
@@ -188,9 +223,9 @@ void SetMinimumWindowSize(const AppState& app) {
   SDL_SetWindowMinimumSize(app.window, width, height);
 }
 
-const std::array<std::pair<Tab, const char*>, 6> kTabs{{
-    {Tab::Play, "Play"}, {Tab::Settings, "Settings"}, {Tab::Controls, "Controls"}, {Tab::Music, "Music"},
-    {Tab::GameFiles, "Game files"}, {Tab::Saves, "Saves"},
+const std::array<std::pair<Tab, const char*>, 5> kTabs{{
+    {Tab::Play, "Play"}, {Tab::Settings, "Settings"}, {Tab::Controls, "Controls"}, {Tab::Content, "Content"},
+    {Tab::GameFiles, "Game files"},
 }};
 
 std::string PathUtf8(const fs::path& path) {
@@ -404,7 +439,8 @@ void LaunchNow(AppState& app) {
   const std::vector<GpuInfo> gpus = app.gpus;
   BeginJob(app, "Starting WWE '13…", [&app, paths, settings, gpus](const ProgressFn&, CancelFlag&) {
     const LaunchPlan plan = BuildLaunchPlan(paths, settings, gpus);
-    const Result result = StartGame(plan);
+    // Watch the first seconds: if the game closes right away the launcher stays open and says so.
+    const Result result = StartGame(plan, 4.0);
     return JobOutcome{result, [&app] {
                         SDL_MinimizeWindow(app.window);
                         app.running = false;
@@ -426,7 +462,7 @@ void StartLaunch(AppState& app) {
   const Paths paths = app.paths;
   BeginJob(app, "Backing up saves before launch…", [&app, paths](const ProgressFn&, CancelFlag&) {
     BackupInfo created;
-    const Result result = BackupSaves(paths, true, &created);
+    const Result result = BackupSaves(paths, true, &created, /*include_creations=*/false);
     std::vector<BackupInfo> backups;
     if (result.ok) backups = ListBackups(paths);
     return JobOutcome{result, [&app, backups = std::move(backups)]() mutable {
@@ -439,7 +475,17 @@ void StartLaunch(AppState& app) {
 void StartInitialization(AppState& app) {
   const fs::path executable = LauncherExecutablePath();
   BeginJob(app, "Getting things ready…", [&app, executable](const ProgressFn&, CancelFlag&) {
-    const Paths paths = ResolvePaths(executable);
+    Paths paths = ResolvePaths(executable);
+    if (!app.userdata_override.empty()) {
+      // Test-only: point the launcher at a scratch user-data folder. Music and backups sit beside it
+      // so a scratch folder stays self-contained (the review harness installs userdata/ music/ backups/).
+      paths.userdata_dir = app.userdata_override;
+      const fs::path root = app.userdata_override.parent_path();
+      if (!root.empty()) {
+        paths.music_dir = root / "music";
+        paths.backups_dir = root / "backups";
+      }
+    }
     const bool exe_dir_writable = CanWriteExeDirectory(paths.exe_dir);
     Settings settings = LoadSettings(paths);
     bool reset_hidden_1080p = false;
@@ -453,22 +499,31 @@ void StartInitialization(AppState& app) {
     }
     const std::vector<GpuInfo> gpus = ListGpus();
     const Recommendation recommendation = RecommendedSettings(gpus);
-    const GameFilesStatus game_files = CheckGameFolder(
-        settings.game_folder.empty() ? paths.default_game_folder : settings.game_folder, paths);
+    const fs::path game_folder =
+        settings.game_folder.empty() ? paths.default_game_folder : settings.game_folder;
+    const GameFilesStatus game_files = CheckGameFolder(game_folder, paths);
     const std::vector<Song> songs = ListSongs(paths);
     const std::vector<BackupInfo> backups = ListBackups(paths);
+    const std::vector<CreationInfo> creations = ListInstalledCreations(paths);
+    const std::vector<ContentPack> content_packs = ListContentPacks(paths);
+    const std::vector<TitantronMovie> titantron_movies = ListTitantronMovies(game_folder);
+    const std::vector<EntranceVideo> entrance_videos = ListEntranceVideos(paths);
     if (exe_dir_writable) EnsureKeyboardDefaults(paths);  // first start: write the modern default keys
     const KeyboardControls controls = LoadKeyboardControls(paths);
     return JobOutcome{Result::Ok(), [&app, paths, settings, settings_save, reset_hidden_1080p,
-                                      exe_dir_writable, controls,
-                                      gpus, recommendation, game_files, songs, backups] {
+                                      exe_dir_writable, controls, gpus, recommendation, game_files, songs,
+                                      backups, creations, content_packs, titantron_movies, entrance_videos] {
                          app.paths = paths;
                          app.settings = settings;
                         app.gpus = gpus;
                         app.recommendation = recommendation;
                         app.game_files = game_files;
-                         app.songs = songs;
-                         app.backups = backups;
+                          app.songs = songs;
+                          app.backups = backups;
+                          app.creations = creations;
+                          app.content_packs = content_packs;
+                          app.titantron_movies = titantron_movies;
+                          app.entrance_videos = entrance_videos;
                          app.controls = controls;
                          app.initialized = true;
                          RefreshFolderInstallables(app);
@@ -497,7 +552,15 @@ void RequestDialog(AppState& app, DialogKind kind, const SDL_DialogFileFilter* f
     app.dialog.failed = false;
     app.dialog.paths.clear();
   }
-  if (kind == DialogKind::GameFolder || kind == DialogKind::Backup) {
+  if (kind == DialogKind::CreationFolder && !app.test_import_folder.empty()) {
+    std::lock_guard lock(app.dialog.mutex);
+    app.dialog.ready = true;
+    app.dialog.paths.emplace_back(PathUtf8(app.test_import_folder));
+    return;
+  }
+  if (kind == DialogKind::GameFolder || kind == DialogKind::Backup ||
+      kind == DialogKind::CreationFiles || kind == DialogKind::CreationFolder ||
+      kind == DialogKind::FullSave || kind == DialogKind::Video) {
     if (const char* selected = std::getenv("WWE13_TEST_DIALOG_PATH"); selected && *selected) {
       std::lock_guard lock(app.dialog.mutex);
       app.dialog.ready = true;
@@ -506,7 +569,7 @@ void RequestDialog(AppState& app, DialogKind kind, const SDL_DialogFileFilter* f
     }
   }
   const std::string default_location = PathUtf8(app.paths.exe_dir);
-  if (kind == DialogKind::GameFolder) {
+  if (kind == DialogKind::GameFolder || kind == DialogKind::CreationFolder) {
     SDL_ShowOpenFolderDialog(
         [](void* userdata, const char* const* filelist, int) {
           auto& app = *static_cast<AppState*>(userdata);
@@ -589,10 +652,30 @@ void StartRemoveSong(AppState& app, fs::path file) {
 void StartFindGameFiles(AppState& app) {
   const Paths paths = app.paths;
   BeginJob(app, "Finding game files…", [&app, paths](const ProgressFn& progress, CancelFlag& cancel) {
-    std::vector<FoundGame> candidates = FindGameFiles(paths, progress, cancel);
-    return JobOutcome{Result::Ok(), [&app, candidates = std::move(candidates)]() mutable {
+    std::vector<fs::path> packages;
+    std::vector<FoundGame> candidates = FindGameFiles(paths, progress, cancel, &packages);
+    bool has_title_update = false;
+    for (const fs::path& package : packages) {
+      const std::optional<PackageInfo> info = InspectPackage(package);
+      has_title_update = has_title_update || (info && info->kind == PackageKind::kTitleUpdate);
+    }
+    return JobOutcome{Result::Ok(), [&app, candidates = std::move(candidates),
+                                     packages = std::move(packages), has_title_update]() mutable {
                         app.candidates = std::move(candidates);
                         app.scroll_to_candidates = !app.candidates.empty();
+                        if (!packages.empty()) {
+                          // Offer the title update / DLC found anywhere on the PC (installs into the
+                          // chosen game folder, like "Add TU or DLC").
+                          for (const fs::path& package : app.folder_installables.packages) {
+                            if (std::find(packages.begin(), packages.end(), package) == packages.end()) {
+                              packages.push_back(package);
+                            }
+                          }
+                          app.folder_installables.packages = std::move(packages);
+                          app.folder_installables.has_title_update =
+                              app.folder_installables.has_title_update || has_title_update;
+                          app.folder_installables.from_search = true;
+                        }
                         if (app.candidates.empty()) SetBanner(app, "No WWE '13 folder was found. Choose a folder to check.");
                         else SetBanner(app, "Choose a verified game folder below.", true);
                       }};
@@ -602,12 +685,31 @@ void StartFindGameFiles(AppState& app) {
 // Looks in the "WWE 13" folder next to the launcher for a disc image, title update or DLC files a player copied
 // there, so the Game files page can offer to install them (the README tells players to put files in that folder).
 void RefreshFolderInstallables(AppState& app) {
+  // Packages found by "Find Automatically" elsewhere on the PC stay offered until installed or gone.
+  std::vector<fs::path> searched;
+  bool searched_title_update = false;
+  if (app.folder_installables.from_search) {
+    for (const fs::path& package : app.folder_installables.packages) {
+      std::error_code error;
+      if (fs::exists(package, error)) searched.push_back(package);
+    }
+    searched_title_update = app.folder_installables.has_title_update;
+  }
   app.folder_installables = FolderInstallables{};
   if (app.paths.default_game_folder.empty()) return;
   const bool needs_base = app.game_files.base_game != FileState::kFound;
   const bool needs_more = app.game_files.title_update != FileState::kFound ||
                           app.game_files.dlc_installed < app.game_files.dlc_known;
   if (needs_base || needs_more) app.folder_installables = FindInstallableFiles(app.paths.default_game_folder);
+  if (needs_more && !searched.empty()) {
+    for (const fs::path& package : searched) {
+      auto& packages = app.folder_installables.packages;
+      if (std::find(packages.begin(), packages.end(), package) == packages.end()) packages.push_back(package);
+    }
+    app.folder_installables.has_title_update =
+        app.folder_installables.has_title_update || searched_title_update;
+    app.folder_installables.from_search = true;
+  }
 }
 
 void StartExtractDisc(AppState& app, fs::path image) {
@@ -676,6 +778,233 @@ void StartImportPackages(AppState& app, std::vector<fs::path> packages) {
   });
 }
 
+const char* CreationKindText(CreationKind kind) {
+  switch (kind) {
+    case CreationKind::kSuperstar: return "Superstar";
+    case CreationKind::kEntrance: return "Entrance";
+    case CreationKind::kArena: return "Arena";
+    case CreationKind::kLogos: return "Logos";
+    case CreationKind::kSave: return "Save";
+  }
+  return "Creation";
+}
+
+// The name shown for a pack is the folder (or file) the player chose to import.
+std::string PackNameFromSources(const std::vector<fs::path>& sources) {
+  if (sources.empty()) return {};
+  const fs::path& first = sources.front();
+  std::error_code error;
+  const bool first_is_directory = fs::is_directory(first, error) && !error;
+  if (sources.size() == 1) return PathUtf8(first_is_directory ? first.filename() : first.stem());
+  const fs::path parent = first.parent_path();
+  if (!parent.filename().empty()) {
+    bool shared = true;
+    for (const auto& source : sources) {
+      if (source.parent_path() != parent) {
+        shared = false;
+        break;
+      }
+    }
+    if (shared) return PathUtf8(parent.filename());
+  }
+  return PathUtf8(first.stem());
+}
+
+void StartPrepareCreations(AppState& app, std::vector<fs::path> sources) {
+  if (sources.empty()) return;
+  const Paths paths = app.paths;
+  const std::string pack_name = PackNameFromSources(sources);
+  BeginJob(app, "Reading custom creations…", [&app, paths, sources = std::move(sources), pack_name](
+                                                   const ProgressFn& progress, CancelFlag& cancel) {
+    std::vector<fs::path> packages;
+    std::vector<std::string> skipped;
+    std::error_code filesystem_error;
+    for (const auto& source : sources) {
+      if (cancel.load()) return JobOutcome{Result::Fail("The import was canceled."), {}};
+      filesystem_error.clear();
+      if (fs::is_directory(source, filesystem_error) && !filesystem_error) {
+        const auto found = FindCreationPackages(source);
+        packages.insert(packages.end(), found.begin(), found.end());
+      } else {
+        packages.push_back(source);
+      }
+    }
+    std::vector<fs::path> valid_paths;
+    std::vector<CreationInfo> infos;
+    for (const auto& package : packages) {
+      if (cancel.load()) return JobOutcome{Result::Fail("The import was canceled."), {}};
+      const auto info = InspectCreationPackage(package);
+      if (!info) {
+        skipped.push_back(PathUtf8(package.filename()));
+        continue;
+      }
+      valid_paths.push_back(package);
+      infos.push_back(*info);
+      if (progress) progress(infos.size(), packages.size(), PathUtf8(package.filename()));
+    }
+    if (infos.empty()) {
+      return JobOutcome{Result::Fail("No supported WWE '13 Superstar, Entrance, Arena, Logos, or Save packages were found."), {}};
+    }
+    const std::vector<CreationInfo> installed = ListInstalledCreations(paths);
+    std::vector<bool> replacements;
+    replacements.reserve(infos.size());
+    for (const auto& info : infos) {
+      const std::string name = PathUtf8(Utf8Path(info.package_name).filename());
+      const bool exists = std::any_of(installed.begin(), installed.end(), [&](const CreationInfo& item) {
+        std::string left = item.package_name;
+        std::string right = name;
+        std::transform(left.begin(), left.end(), left.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        std::transform(right.begin(), right.end(), right.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return left == right;
+      });
+      replacements.push_back(exists);
+    }
+    return JobOutcome{Result::Ok(), [&app, valid_paths = std::move(valid_paths), infos = std::move(infos),
+                                      replacements = std::move(replacements), skipped = std::move(skipped),
+                                      pack_name]() mutable {
+                        app.pending_creation_paths = std::move(valid_paths);
+                        app.pending_creations = std::move(infos);
+                        app.pending_creation_replacements = std::move(replacements);
+                        app.pending_creation_skipped = std::move(skipped);
+                        app.pending_pack_name = pack_name;
+                        app.selected_creation.clear();
+                        SetBanner(app, "Review the selected items before installing.");
+                      }};
+  });
+}
+
+void StartImportCreations(AppState& app, bool replace_existing) {
+  std::vector<fs::path> packages;
+  size_t skipped_saves = 0;
+  size_t normalized_titles = 0;
+  for (size_t index = 0; index < app.pending_creation_paths.size() && index < app.pending_creations.size(); ++index) {
+    const CreationInfo& info = app.pending_creations[index];
+    if (info.kind == CreationKind::kSave) {
+      ++skipped_saves;
+      continue;
+    }
+    packages.push_back(app.pending_creation_paths[index]);
+    if (info.title_id_normalized) ++normalized_titles;
+  }
+  if (packages.empty()) {
+    SetBanner(app, skipped_saves ? "Use Import a full save to replace the main WWE '13 save." :
+                                  "Choose at least one creation package to install.");
+    return;
+  }
+  const Paths paths = app.paths;
+  const std::string pack_name = app.pending_pack_name;
+  BeginJob(app, "Installing custom creations…", [&app, paths, packages = std::move(packages), replace_existing,
+                                                    skipped_saves, normalized_titles, pack_name](
+                                                       const ProgressFn& progress, CancelFlag& cancel) {
+    const std::vector<BackupInfo> before = ListBackups(paths);
+    const Result result = ImportCreations(paths, packages, replace_existing, progress, cancel, pack_name);
+    const std::vector<CreationInfo> installed = result.ok ? ListInstalledCreations(paths) : std::vector<CreationInfo>{};
+    const std::vector<BackupInfo> backups = result.ok ? ListBackups(paths) : std::vector<BackupInfo>{};
+    const std::vector<ContentPack> packs = result.ok ? ListContentPacks(paths) : std::vector<ContentPack>{};
+    const bool backup_created = result.ok && !backups.empty() &&
+                                (before.empty() || backups.front().file != before.front().file);
+    return JobOutcome{result, [&app, installed, backups, packs, skipped_saves, normalized_titles, backup_created] {
+                        app.creations = installed;
+                        app.backups = backups;
+                        app.content_packs = packs;
+                        app.pending_creation_paths.clear();
+                        app.pending_creations.clear();
+                        app.pending_creation_replacements.clear();
+                        app.pending_creation_skipped.clear();
+                        app.pending_pack_name.clear();
+                        app.selected_creation.clear();
+                        std::string message = backup_created ?
+                                                  "Custom creations installed. Your saves were backed up before changes." :
+                                                  "Custom creations installed.";
+                        if (normalized_titles) {
+                          message += " " + std::to_string(normalized_titles) +
+                                     " entrance package(s) tagged 54510890 were stored as WWE '13 content (545108B4).";
+                        }
+                         if (skipped_saves) {
+                           message += " The selected Save package was skipped; this import did not change your current save.";
+                         }
+                        SetBanner(app, std::move(message), true);
+                      }};
+  });
+}
+
+void StartInspectFullSave(AppState& app, fs::path package) {
+  BeginJob(app, "Checking the full save…", [&app, package = std::move(package)](const ProgressFn&, CancelFlag&) {
+    const auto info = InspectCreationPackage(package);
+    if (!info || info->kind != CreationKind::kSave || info->title_id != 0x545108B4) {
+      return JobOutcome{Result::Fail("Choose a WWE '13 SaveData.dat package (title ID 545108B4)."), {}};
+    }
+    return JobOutcome{Result::Ok(), [&app, package, info = *info] {
+                        app.pending_full_save_path = package;
+                        app.pending_full_save_info = info;
+                        app.confirm_full_save = false;
+                        SetBanner(app, "Review the full save before replacing your current save.");
+                      }};
+  });
+}
+
+void StartImportFullSave(AppState& app) {
+  if (app.pending_full_save_path.empty()) return;
+  const Paths paths = app.paths;
+  const fs::path package = app.pending_full_save_path;
+  BeginJob(app, "Replacing the full WWE '13 save…", [&app, paths, package](const ProgressFn& progress, CancelFlag& cancel) {
+    const std::vector<BackupInfo> before = ListBackups(paths);
+    const Result result = ImportFullSave(paths, package, progress, cancel);
+    const std::vector<CreationInfo> installed = result.ok ? ListInstalledCreations(paths) : std::vector<CreationInfo>{};
+    const std::vector<BackupInfo> backups = result.ok ? ListBackups(paths) : std::vector<BackupInfo>{};
+    const std::vector<ContentPack> packs = result.ok ? ListContentPacks(paths) : std::vector<ContentPack>{};
+    const bool backup_created = result.ok && !backups.empty() &&
+                                (before.empty() || backups.front().file != before.front().file);
+    return JobOutcome{result, [&app, installed, backups, packs, backup_created, package] {
+                        app.creations = installed;
+                        app.backups = backups;
+                        app.content_packs = packs;
+                        app.pending_full_save_path.clear();
+                        app.pending_full_save_info.reset();
+                        app.confirm_full_save = false;
+                        for (size_t index = app.pending_creation_paths.size(); index > 0; --index) {
+                          if (app.pending_creation_paths[index - 1] == package) {
+                            app.pending_creation_paths.erase(app.pending_creation_paths.begin() +
+                                                             static_cast<std::ptrdiff_t>(index - 1));
+                            if (index - 1 < app.pending_creations.size()) {
+                              app.pending_creations.erase(app.pending_creations.begin() +
+                                                          static_cast<std::ptrdiff_t>(index - 1));
+                            }
+                            if (index - 1 < app.pending_creation_replacements.size()) {
+                              app.pending_creation_replacements.erase(app.pending_creation_replacements.begin() +
+                                                                       static_cast<std::ptrdiff_t>(index - 1));
+                            }
+                          }
+                        }
+                        SetBanner(app, backup_created ? "Full save imported. Your previous saves were backed up." :
+                                                         "Full save imported.", true);
+                      }};
+  });
+}
+
+void StartRemoveCreation(AppState& app, std::string package_name) {
+  if (package_name.empty()) return;
+  const Paths paths = app.paths;
+  BeginJob(app, "Removing custom creation…", [&app, paths, package_name = std::move(package_name)](
+                                                    const ProgressFn&, CancelFlag&) {
+    const std::vector<BackupInfo> before = ListBackups(paths);
+    const Result result = RemoveCreation(paths, package_name);
+    const std::vector<CreationInfo> installed = result.ok ? ListInstalledCreations(paths) : std::vector<CreationInfo>{};
+    const std::vector<BackupInfo> backups = result.ok ? ListBackups(paths) : std::vector<BackupInfo>{};
+    const bool backup_created = result.ok && !backups.empty() &&
+                                (before.empty() || backups.front().file != before.front().file);
+    return JobOutcome{result, [&app, installed, backups, package_name, backup_created] {
+                        app.creations = installed;
+                        app.backups = backups;
+                        app.selected_creation.clear();
+                        app.pending_remove_creation.clear();
+                        app.confirm_remove_creation = false;
+                        SetBanner(app, backup_created ? "Creation removed. Your saves were backed up first." :
+                                                         "Creation removed.", true);
+                      }};
+  });
+}
+
 void StartBackup(AppState& app, bool automatic = false) {
   const Paths paths = app.paths;
   BeginJob(app, automatic ? "Backing up saves before launch…" : "Backing up saves…",
@@ -707,9 +1036,60 @@ void StartRestoreBackup(AppState& app, fs::path file) {
   BeginJob(app, "Restoring saves…", [&app, paths, file = std::move(file)](const ProgressFn& progress, CancelFlag&) {
     const Result result = RestoreBackup(paths, file);
     const std::vector<BackupInfo> backups = result.ok ? ListBackups(paths) : std::vector<BackupInfo>{};
-    return JobOutcome{result, [&app, backups] {
+    const std::vector<CreationInfo> creations =
+        result.ok ? ListInstalledCreations(paths) : std::vector<CreationInfo>{};
+    return JobOutcome{result, [&app, backups, creations] {
                         app.backups = backups;
+                        app.creations = creations;
                         SetBanner(app, "Saves restored from the selected backup.", true);
+                      }};
+  });
+}
+
+void StartAssignVideo(AppState& app, std::string stem, fs::path file) {
+  const Paths paths = app.paths;
+  BeginJob(app, "Assigning entrance video…", [&app, paths, stem = std::move(stem), file = std::move(file)](
+                                                  const ProgressFn&, CancelFlag&) {
+    const Result result = AssignEntranceVideo(paths, stem, file);
+    const std::vector<EntranceVideo> videos =
+        result.ok ? ListEntranceVideos(paths) : std::vector<EntranceVideo>{};
+    return JobOutcome{result, [&app, videos] {
+                        app.entrance_videos = videos;
+                        SetBanner(app, "Entrance video assigned.", true);
+                      }};
+  });
+}
+
+void StartRemoveVideo(AppState& app, std::string stem) {
+  const Paths paths = app.paths;
+  BeginJob(app, "Removing entrance video…", [&app, paths, stem = std::move(stem)](const ProgressFn&, CancelFlag&) {
+    const Result result = RemoveEntranceVideo(paths, stem);
+    const std::vector<EntranceVideo> videos =
+        result.ok ? ListEntranceVideos(paths) : std::vector<EntranceVideo>{};
+    return JobOutcome{result, [&app, videos] {
+                        app.entrance_videos = videos;
+                        SetBanner(app, "Entrance video removed.", true);
+                      }};
+  });
+}
+
+void StartRemovePack(AppState& app, std::string pack_id) {
+  const Paths paths = app.paths;
+  BeginJob(app, "Removing content pack…", [&app, paths, pack_id = std::move(pack_id)](
+                                              const ProgressFn& progress, CancelFlag&) {
+    const Result result = RemoveContentPack(paths, pack_id);
+    const std::vector<CreationInfo> creations =
+        result.ok ? ListInstalledCreations(paths) : std::vector<CreationInfo>{};
+    const std::vector<BackupInfo> backups = result.ok ? ListBackups(paths) : std::vector<BackupInfo>{};
+    const std::vector<ContentPack> packs = result.ok ? ListContentPacks(paths) : std::vector<ContentPack>{};
+    return JobOutcome{result, [&app, creations, backups, packs] {
+                        app.creations = creations;
+                        app.backups = backups;
+                        app.content_packs = packs;
+                        app.selected_creation.clear();
+                        app.pending_remove_pack.clear();
+                        app.confirm_remove_pack = false;
+                        SetBanner(app, "Content pack removed. Your saves were restored from the backup.", true);
                       }};
   });
 }
@@ -763,6 +1143,18 @@ void ConsumeDialog(AppState& app) {
     case DialogKind::Backup:
       StartImportBackup(app, paths.front());
       break;
+    case DialogKind::CreationFiles:
+      StartPrepareCreations(app, std::move(paths));
+      break;
+    case DialogKind::CreationFolder:
+      StartPrepareCreations(app, {paths.front()});
+      break;
+    case DialogKind::FullSave:
+      StartInspectFullSave(app, paths.front());
+      break;
+    case DialogKind::Video:
+      StartAssignVideo(app, app.pending_video_stem, paths.front());
+      break;
     case DialogKind::None:
       break;
   }
@@ -786,10 +1178,14 @@ void ProcessDrops(AppState& app) {
     SetBanner(app, kDropWaitMessage);
     return;
   }
-  if (app.tab == Tab::Music) {
+  if (app.tab == Tab::Content && app.content_category == ContentCategory::Music) {
     std::vector<fs::path> files;
     for (const auto& path : dropped) files.push_back(Utf8Path(path));
     StartAddSongs(app, std::move(files));
+  } else if (app.tab == Tab::Content) {
+    std::vector<fs::path> packages;
+    for (const auto& path : dropped) packages.push_back(Utf8Path(path));
+    StartPrepareCreations(app, std::move(packages));
   } else if (app.tab == Tab::GameFiles) {
     std::vector<fs::path> packages;
     for (const auto& path : dropped) {
@@ -863,6 +1259,13 @@ void DrawPanelHeading(const AppState& app, const char* title, const char* hint) 
   if (hint && *hint) {
     DrawSecondaryWrapped(app, hint);
   }
+}
+
+// Height for a scrollable category list: everything left on the page above the footer, so lists fill the
+// window and scroll inside instead of stopping short and leaving a large empty area.
+float FillListHeight(const AppState& app, float reserve = 0.0f) {
+  const float available = ImGui::GetContentRegionAvail().y - S(app, reserve);
+  return std::max(available, S(app, 120.0f));
 }
 
 void DrawNavButton(AppState& app, Tab tab, const char* label) {
@@ -979,6 +1382,64 @@ bool AccentButton(const AppState& app, const char* label, ImVec2 size = ImVec2(0
   return clicked;
 }
 
+// Every confirmation in the launcher uses this one dialog: no ImGui title bar (the title is a page-style
+// heading), launcher panel background and rounded corners, a fixed comfortable width with a height that fits
+// the wrapped text, right-aligned secondary + red primary buttons, and Esc cancels.
+enum class DialogResult { None, Primary, Secondary };
+
+DialogResult LauncherDialog(const AppState& app, bool& open, const char* id, const char* heading,
+                            const std::string& body, const char* primary_label,
+                            const char* secondary_label = "Cancel") {
+  if (open) ImGui::OpenPopup(id);
+  DialogResult result = DialogResult::None;
+  const float width = S(app, 520.0f);
+  const ImVec2 primary_size(S(app, 150.0f), S(app, 38.0f));
+  const ImVec2 secondary_size(S(app, 120.0f), S(app, 38.0f));
+  ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, FLT_MAX));
+  ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::PushStyleColor(ImGuiCol_PopupBg, kPanel);
+  ImGui::PushStyleColor(ImGuiCol_Border, kBorder);
+  ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, S(app, 14.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, S(app, 1.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, S(app, 26.0f, 22.0f));
+  if (ImGui::BeginPopupModal(id, nullptr,
+                             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                                 ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (!open) {
+      // The caller cleared its flag while the popup was still up (for example a test capture): close it
+      // instead of drawing a dialog the caller no longer wants.
+      ImGui::CloseCurrentPopup();
+    } else {
+      ImGui::PushFont(app.fonts.oswald_semibold);
+      ImGui::PushStyleColor(ImGuiCol_Text, kText);
+      ImGui::TextUnformatted(heading);
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+      ImGui::Spacing();
+      DrawSecondaryWrapped(app, body.c_str(), kSecondary);
+      ImGui::Dummy(ImVec2(0.0f, S(app, 16.0f)));
+      const float gap = ImGui::GetStyle().ItemSpacing.x;
+      const float buttons_width = primary_size.x + secondary_size.x + gap;
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - buttons_width);
+      if (ImGui::Button(secondary_label, secondary_size)) result = DialogResult::Secondary;
+      ImGui::SameLine();
+      if (AccentButton(app, primary_label, primary_size)) result = DialogResult::Primary;
+      if (result == DialogResult::None && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        result = DialogResult::Secondary;
+      }
+      if (result != DialogResult::None) {
+        open = false;
+        ImGui::CloseCurrentPopup();
+      }
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::PopStyleVar(3);
+  ImGui::PopStyleColor(2);
+  return result;
+}
+
 void DrawPlay(AppState& app) {
   const Settings current = ActiveSettings(app);
   const float width = ImGui::GetContentRegionAvail().x;
@@ -1000,6 +1461,7 @@ void DrawPlay(AppState& app) {
   ImGui::PushStyleColor(ImGuiCol_Text, kSecondary);
   ImGui::TextWrapped("Recommended for this PC: %s · settings picked automatically",
                      app.recommendation.reason.c_str());
+  ImGui::TextUnformatted("To quit the game, press Alt+F4.");
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::EndChild();
@@ -1322,10 +1784,285 @@ void DrawSongTitle(const AppState& app, const std::string& title) {
   ImGui::Dummy(ImVec2(x - ImGui::GetCursorScreenPos().x, ImGui::GetTextLineHeight()));
 }
 
-void DrawMusic(AppState& app) {
+// ------------------------------------------------------------------------------------------- content manager
+
+const char* ContentCategoryLabel(ContentCategory category) {
+  switch (category) {
+    case ContentCategory::Superstars: return "Superstars";
+    case ContentCategory::Entrances: return "Entrances";
+    case ContentCategory::Arenas: return "Arenas";
+    case ContentCategory::Logos: return "Logos";
+    case ContentCategory::Videos: return "Videos";
+    case ContentCategory::Music: return "Music";
+    case ContentCategory::SaveData: return "Save Data";
+  }
+  return "Content";
+}
+
+const char* ContentCategoryHint(ContentCategory category) {
+  switch (category) {
+    case ContentCategory::Superstars: return "Custom wrestlers you pick in match select and edit in Create a Superstar.";
+    case ContentCategory::Entrances: return "Custom entrance animations.";
+    case ContentCategory::Arenas: return "Custom arenas for Create an Arena.";
+    case ContentCategory::Logos: return "Paint Tool images and logos.";
+    case ContentCategory::Videos: return "Custom entrance videos come with imported entrances.";
+    case ContentCategory::Music: return "Custom entrance music. Pick these in the entrance editor under User Playlist.";
+    case ContentCategory::SaveData: return "Your saved game, its backups, and restoring a backup.";
+  }
+  return "";
+}
+
+bool SlotLess(const std::string& left, const std::string& right) {
+  const auto numeric = [](const std::string& value) {
+    bool all_digits = !value.empty();
+    for (unsigned char c : value) all_digits = all_digits && std::isdigit(c) != 0;
+    return all_digits ? std::stoull(value) : 0ull;
+  };
+  const bool left_num = !left.empty() && std::all_of(left.begin(), left.end(), [](unsigned char c) {
+                          return std::isdigit(c) != 0;
+                        });
+  const bool right_num = !right.empty() && std::all_of(right.begin(), right.end(), [](unsigned char c) {
+                           return std::isdigit(c) != 0;
+                         });
+  if (left_num && right_num && left != right) return numeric(left) < numeric(right);
+  return left < right;
+}
+
+std::string LowerCase(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return value;
+}
+
+// True when the installed package is indexed by a save-indexed pack (using the cached pack list).
+bool IsSaveIndexed(const AppState& app, std::string_view package_name) {
+  for (const auto& pack : app.content_packs) {
+    if (!pack.save_indexed) continue;
+    for (const auto& name : pack.packages) {
+      if (LowerCase(name) == LowerCase(std::string(package_name))) return true;
+    }
+  }
+  return false;
+}
+
+// A display name for a content pack: the folder/file name chosen at import, or, for an old pack recorded
+// before names were stored, the in-game name of its first item plus how many more came with it.
+std::string ContentPackName(const AppState& app, const ContentPack& pack) {
+  if (!pack.name.empty()) return pack.name;
+  if (pack.packages.empty()) return "Content pack";
+  std::string first;
+  for (const auto& creation : app.creations) {
+    if (LowerCase(creation.package_name) == LowerCase(pack.packages.front())) {
+      first = creation.display_name;
+      break;
+    }
+  }
+  if (first.empty()) first = pack.packages.front();
+  if (pack.packages.size() > 1) {
+    return first + " + " + std::to_string(pack.packages.size() - 1) + " more";
+  }
+  return first;
+}
+
+std::vector<CreationInfo> SortedCreations(const AppState& app, CreationKind kind) {
+  std::vector<CreationInfo> result;
+  for (const auto& creation : app.creations) {
+    if (creation.kind == kind) result.push_back(creation);
+  }
+  const std::string& sort = app.creation_sort;
+  std::sort(result.begin(), result.end(), [&](const CreationInfo& left, const CreationInfo& right) {
+    if (sort == "slot") {
+      if (left.slot != right.slot) return SlotLess(left.slot, right.slot);
+    } else if (sort == "date") {
+      if (left.when != right.when) return left.when > right.when;  // newest first
+    }
+    const std::string left_name = LowerCase(left.display_name);
+    const std::string right_name = LowerCase(right.display_name);
+    if (left_name != right_name) return left_name < right_name;
+    return LowerCase(left.package_name) < LowerCase(right.package_name);
+  });
+  return result;
+}
+
+void DrawContentTabs(AppState& app) {
+  // Videos is hidden until custom entrance videos work in the game (owner, v1.1); its page code stays.
+  const std::array<ContentCategory, 6> categories{{
+      ContentCategory::Superstars, ContentCategory::Entrances, ContentCategory::Arenas, ContentCategory::Logos,
+      ContentCategory::Music, ContentCategory::SaveData,
+  }};
+  const float gap = ImGui::GetStyle().ItemSpacing.x;
+  const float width = (ImGui::GetContentRegionAvail().x - gap * static_cast<float>(categories.size() - 1)) /
+                      static_cast<float>(categories.size());
+  for (size_t i = 0; i < categories.size(); ++i) {
+    if (i) ImGui::SameLine();
+    DrawSegment(app, ContentCategoryLabel(categories[i]), app.content_category == categories[i], width,
+                [&app, category = categories[i]] { app.content_category = category; });
+  }
+}
+
+// Removes one installed creation (single item). Only offered when the item is safe to remove on its own.
+void StartRemoveCreationSafe(AppState& app, std::string package_name) {
+  if (package_name.empty()) return;
+  if (!IsCreationRemovalSafe(app.paths, package_name)) {
+    SetBanner(app, "These items came in a pack together. Remove the whole pack in Save Data instead.");
+    return;
+  }
+  app.pending_remove_creation = std::move(package_name);
+  app.confirm_remove_creation = true;
+}
+
+void DrawCreationCategory(AppState& app, CreationKind kind) {
+  const ContentCategory category = [&] {
+    switch (kind) {
+      case CreationKind::kSuperstar: return ContentCategory::Superstars;
+      case CreationKind::kEntrance: return ContentCategory::Entrances;
+      case CreationKind::kArena: return ContentCategory::Arenas;
+      case CreationKind::kLogos: return ContentCategory::Logos;
+      case CreationKind::kSave: return ContentCategory::SaveData;
+    }
+    return ContentCategory::Superstars;
+  }();
+  DrawSecondaryWrapped(app, ContentCategoryHint(category));
+  ImGui::Spacing();
+
+  const char* extensions = kind == CreationKind::kSuperstar ? "cas"
+                           : kind == CreationKind::kEntrance  ? "enc"
+                           : kind == CreationKind::kArena     ? "car"
+                                                              : "pt";
+  const char* filter_name = kind == CreationKind::kSuperstar ? "Superstars"
+                            : kind == CreationKind::kEntrance  ? "Entrances"
+                            : kind == CreationKind::kArena     ? "Arenas"
+                                                               : "Logos";
+  if (ImGui::Button("Add…", S(app, 130.0f, 38.0f))) {
+    static SDL_DialogFileFilter filters[1];
+    filters[0] = {filter_name, extensions};
+    RequestDialog(app, DialogKind::CreationFiles, filters, 1, true);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Add a folder…", S(app, 150.0f, 38.0f))) {
+    RequestDialog(app, DialogKind::CreationFolder, nullptr, 0, false);
+  }
+  ImGui::SameLine();
+  DrawTextDisabled(app, "Imported items appear under their category.");
+  ImGui::Spacing();
+
+  const std::vector<CreationInfo> items = SortedCreations(app, kind);
+  const std::string count = std::to_string(items.size()) +
+                            (items.size() == 1 ? " item" : " items");
+  DrawSecondaryWrapped(app, count.c_str());
+  ImGui::SameLine(ImGui::GetWindowWidth() - S(app, 230.0f));
   ImGui::PushFont(app.fonts.barlow_small);
-  ImGui::TextColored(kSecondary, "Pick these in the entrance editor under User Playlist.");
+  ImGui::TextColored(kMuted, "Sort:");
   ImGui::PopFont();
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(S(app, 150.0f));
+  if (ImGui::BeginCombo("##creations-sort", app.creation_sort.c_str())) {
+    if (ImGui::Selectable("name", app.creation_sort == "name")) app.creation_sort = "name";
+    if (ImGui::Selectable("slot", app.creation_sort == "slot")) app.creation_sort = "slot";
+    if (ImGui::Selectable("date", app.creation_sort == "date")) app.creation_sort = "date";
+    ImGui::EndCombo();
+  }
+  ImGui::Spacing();
+
+  if (items.empty()) {
+    DrawTextDisabled(app, "Nothing installed in this category yet.");
+    return;
+  }
+  // Items imported together with a save cannot be removed one at a time; say so once, in plain language.
+  const bool any_pack_item =
+      std::any_of(items.begin(), items.end(),
+                  [&](const CreationInfo& item) { return IsSaveIndexed(app, item.package_name); });
+  if (any_pack_item) {
+    DrawSecondaryWrapped(app,
+        "These came in a pack together. To remove them, remove the whole pack in Save Data.");
+    ImGui::Spacing();
+  }
+  ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, S(app, 14.0f, 8.0f));
+  if (ImGui::BeginTable("content-creation-table", 4,
+                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
+                        ImVec2(0.0f, FillListHeight(app)))) {
+    ImGui::TableSetupColumn("NAME", ImGuiTableColumnFlags_WidthStretch, 0.50f);
+    ImGui::TableSetupColumn("SLOT", ImGuiTableColumnFlags_WidthFixed, S(app, 72.0f));
+    ImGui::TableSetupColumn("SOURCE", ImGuiTableColumnFlags_WidthStretch, 0.34f);
+    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, S(app, 105.0f));
+    ImGui::TableHeadersRow();
+    for (size_t i = 0; i < items.size(); ++i) {
+      const CreationInfo& item = items[i];
+      ImGui::TableNextRow(ImGuiTableRowFlags_None, S(app, 31.0f));
+      ImGui::TableSetColumnIndex(0);
+      const bool selected = app.selected_creation == item.package_name;
+      if (ImGui::Selectable(item.display_name.c_str(), selected,
+                            ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap)) {
+        app.selected_creation = item.package_name;
+      }
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextUnformatted(item.slot.c_str());
+      ImGui::TableSetColumnIndex(2);
+      ImGui::TextColored(kMuted, "%s", item.package_name.c_str());
+      ImGui::TableSetColumnIndex(3);
+      const std::string id = "Remove##creation" + std::to_string(i);
+      if (IsSaveIndexed(app, item.package_name)) {
+        // Part of a pack: the row's Remove button is greyed out and explains why on hover.
+        ImGui::BeginDisabled();
+        ImGui::SmallButton(id.c_str());
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+          ImGui::SetTooltip("These came in a pack together. Remove the whole pack in Save Data.");
+        }
+      } else if (ImGui::SmallButton(id.c_str())) {
+        StartRemoveCreationSafe(app, item.package_name);
+      }
+    }
+    ImGui::EndTable();
+  }
+  ImGui::PopStyleVar();
+}
+
+void DrawContentVideos(AppState& app) {
+  DrawSecondaryWrapped(app, ContentCategoryHint(ContentCategory::Videos));
+  ImGui::Spacing();
+  // Entrance videos ride along inside the imported entrance (.enc) packages: each installed entrance
+  // carries the game's own custom titantron video. List the installed entrances read-only.
+  std::vector<CreationInfo> entrances;
+  for (const auto& creation : app.creations) {
+    if (creation.kind == CreationKind::kEntrance) entrances.push_back(creation);
+  }
+  if (entrances.empty()) {
+    DrawTextDisabled(app, "No imported entrances yet. Add an entrance and its video appears here.");
+    return;
+  }
+  const std::string count = std::to_string(entrances.size()) +
+                            (entrances.size() == 1 ? " entrance video" : " entrance videos");
+  DrawSecondaryWrapped(app, count.c_str());
+  ImGui::Spacing();
+
+  ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, S(app, 14.0f, 8.0f));
+  if (ImGui::BeginTable("entrance-video-table", 3,
+                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
+                        ImVec2(0.0f, FillListHeight(app)))) {
+    ImGui::TableSetupColumn("ENTRANCE", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+    ImGui::TableSetupColumn("SLOT", ImGuiTableColumnFlags_WidthFixed, S(app, 72.0f));
+    ImGui::TableSetupColumn("VIDEO", ImGuiTableColumnFlags_WidthStretch, 0.34f);
+    ImGui::TableHeadersRow();
+    for (const CreationInfo& entrance : entrances) {
+      ImGui::TableNextRow(ImGuiTableRowFlags_None, S(app, 31.0f));
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(entrance.display_name.c_str());
+      ImGui::TableSetColumnIndex(1);
+      ImGui::TextUnformatted(entrance.slot.c_str());
+      ImGui::TableSetColumnIndex(2);
+      ImGui::TextColored(kMuted, "Bundled with this entrance");
+    }
+    ImGui::EndTable();
+  }
+  ImGui::PopStyleVar();
+}
+
+void DrawContentMusic(AppState& app) {
+  DrawSecondaryWrapped(app, ContentCategoryHint(ContentCategory::Music));
   ImGui::Spacing();
   DrawDropZone(app);
   if (ImGui::Button("Choose Files…")) {
@@ -1333,9 +2070,17 @@ void DrawMusic(AppState& app) {
     RequestDialog(app, DialogKind::Music, filters, 1, true);
   }
   ImGui::Spacing();
+  const std::string song_count = std::to_string(app.songs.size()) +
+                                 (app.songs.size() == 1 ? " song" : " songs");
+  ImGui::PushFont(app.fonts.barlow_small);
+  ImGui::TextColored(kMuted, "%s · copied into the game's music folder", song_count.c_str());
+  ImGui::PopFont();
+  ImGui::Spacing();
   ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, S(app, 14.0f, 8.0f));
   if (ImGui::BeginTable("song-table", 4,
-                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
+                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
+                        ImVec2(0.0f, FillListHeight(app)))) {
     ImGui::TableSetupColumn("SONG", ImGuiTableColumnFlags_WidthStretch, 0.54f);
     ImGui::TableSetupColumn("LENGTH", ImGuiTableColumnFlags_WidthFixed, S(app, 88.0f));
     ImGui::TableSetupColumn("TYPE", ImGuiTableColumnFlags_WidthFixed, S(app, 90.0f));
@@ -1357,11 +2102,8 @@ void DrawMusic(AppState& app) {
     ImGui::EndTable();
   }
   ImGui::PopStyleVar();
-  ImGui::Spacing();
-  ImGui::PushFont(app.fonts.barlow_small);
-  ImGui::TextColored(kMuted, "%zu songs · copied into the game's music folder", app.songs.size());
-  ImGui::PopFont();
 }
+
 
 const char* FileStateName(FileState state) {
   switch (state) {
@@ -1484,7 +2226,7 @@ void DrawFolderInstallables(AppState& app) {
       offer_disc ? "Found " + PathUtf8(found.disc_images.front().filename()) + " in your WWE 13 folder."
                  : "Found " + std::to_string(found.packages.size()) +
                        (found.packages.size() == 1 ? " update or DLC file" : " update / DLC files") +
-                       " in your WWE 13 folder.";
+                       (found.from_search ? " on this PC." : " in your WWE 13 folder.");
   ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.20f, 0.14f, 1.0f));
   ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(app, 9.0f));
   ImGui::BeginChild("folder-installables", ImVec2(0, S(app, 58.0f)), false,
@@ -1855,15 +2597,22 @@ void DrawControls(AppState& app) {
   }
 }
 
-void DrawSaves(AppState& app) {
-  if (AccentButton(app, "Back Up Now", S(app, 175.0f, 42.0f))) StartBackup(app);
+void DrawContentSaveData(AppState& app) {
+  DrawSecondaryWrapped(app, ContentCategoryHint(ContentCategory::SaveData));
+  ImGui::Spacing();
+  if (AccentButton(app, "Replace current save…", S(app, 195.0f, 42.0f))) {
+    static const SDL_DialogFileFilter filters[]{{"WWE '13 full saves", "dat"}};
+    RequestDialog(app, DialogKind::FullSave, filters, 1, false);
+  }
   ImGui::SameLine();
-  if (ImGui::Button("Import a Backup…", S(app, 175.0f, 42.0f))) {
+  if (ImGui::Button("Back Up Now", S(app, 150.0f, 42.0f))) StartBackup(app);
+  ImGui::SameLine();
+  if (ImGui::Button("Add a backup…", S(app, 150.0f, 42.0f))) {
     static const SDL_DialogFileFilter filters[]{{"Save backups", "zip"}};
     RequestDialog(app, DialogKind::Backup, filters, 1, false);
   }
   ImGui::SameLine();
-  if (ImGui::Button("Open Save Folder", S(app, 175.0f, 42.0f))) {
+  if (ImGui::Button("Open Save Folder", S(app, 150.0f, 42.0f))) {
     const std::string url = FileUrl(app.paths.userdata_dir);
     if (!SDL_OpenURL(url.c_str())) SetBanner(app, "The save folder could not be opened.");
   }
@@ -1871,11 +2620,54 @@ void DrawSaves(AppState& app) {
   if (ImGui::Checkbox("Back up automatically before each launch (keep last 5)", &app.settings.auto_backup)) {
     SaveSettings(app);
   }
+
+  if (!app.content_packs.empty()) {
+    ImGui::Spacing();
+    // Size the box to its rows so the header and every pack row are visible (up to 6 rows; more scroll).
+    const size_t rows = std::min<size_t>(app.content_packs.size(), 6);
+    const float table_height = S(app, 30.0f) + static_cast<float>(rows) * S(app, 31.0f);
+    const float pack_height = S(app, 76.0f) + table_height + S(app, 8.0f);
+    if (BeginPanel(app, "content-packs", ImVec2(0.0f, pack_height))) {
+      DrawPanelHeading(app, "CONTENT PACKS",
+          "Content imported together. Remove a pack as a whole to keep your save intact.");
+      ImGui::Spacing();
+      if (ImGui::BeginTable("content-packs-table", 4,
+                            ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
+                            ImVec2(0.0f, table_height))) {
+        ImGui::TableSetupColumn("NAME", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+        ImGui::TableSetupColumn("ITEMS", ImGuiTableColumnFlags_WidthFixed, S(app, 70.0f));
+        ImGui::TableSetupColumn("IMPORTED", ImGuiTableColumnFlags_WidthFixed, S(app, 150.0f));
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, S(app, 120.0f));
+        ImGui::TableHeadersRow();
+        for (size_t i = 0; i < app.content_packs.size(); ++i) {
+          const ContentPack& pack = app.content_packs[i];
+          ImGui::TableNextRow(ImGuiTableRowFlags_None, S(app, 31.0f));
+          ImGui::TableSetColumnIndex(0);
+          ImGui::TextUnformatted(ContentPackName(app, pack).c_str());
+          ImGui::TableSetColumnIndex(1);
+          ImGui::TextUnformatted(std::to_string(pack.packages.size()).c_str());
+          ImGui::TableSetColumnIndex(2);
+          ImGui::TextUnformatted(FriendlyDate(pack.when).c_str());
+          ImGui::TableSetColumnIndex(3);
+          const std::string id = "Remove pack##pack" + std::to_string(i);
+          if (ImGui::SmallButton(id.c_str())) {
+            app.pending_remove_pack = pack.id;
+            app.confirm_remove_pack = true;
+          }
+        }
+        ImGui::EndTable();
+      }
+    }
+    EndPanel();
+  }
+
   ImGui::Spacing();
   ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, S(app, 14.0f, 8.0f));
-  bool open_restore_popup = false;
   if (ImGui::BeginTable("backup-table", 4,
-                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
+                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                            ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
+                        ImVec2(0.0f, FillListHeight(app)))) {
     ImGui::TableSetupColumn("BACKUP", ImGuiTableColumnFlags_WidthStretch, 0.48f);
     ImGui::TableSetupColumn("SIZE", ImGuiTableColumnFlags_WidthFixed, S(app, 100.0f));
     ImGui::TableSetupColumn("TYPE", ImGuiTableColumnFlags_WidthFixed, S(app, 100.0f));
@@ -1894,26 +2686,194 @@ void DrawSaves(AppState& app) {
       const std::string id = "Restore##backup" + std::to_string(i);
       if (ImGui::SmallButton(id.c_str())) {
         app.restore_file = backup.file;
-        open_restore_popup = true;
+        app.confirm_restore_backup = true;
       }
     }
     ImGui::EndTable();
   }
   ImGui::PopStyleVar();
-  if (open_restore_popup) ImGui::OpenPopup("Restore this backup?");
-  if (ImGui::BeginPopupModal("Restore this backup?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextWrapped("Replace your current saves with this backup?\nYour current saves are backed up first.");
+  if (LauncherDialog(app, app.confirm_restore_backup, "Restore this backup?", "Restore this backup?",
+                     "Replace your current saves with this backup? Your current saves are backed up first.",
+                     "Replace") == DialogResult::Primary) {
+    StartRestoreBackup(app, app.restore_file);
+  }
+}
+
+void DrawPendingCreations(AppState& app) {
+  ImGui::Spacing();
+  if (BeginPanel(app, "creations-pending", ImVec2(0.0f, S(app, 350.0f)))) {
+    DrawPanelHeading(app, "READY TO ADD", "Review in-game names and item types before installing.");
     ImGui::Spacing();
-    if (AccentButton(app, "Replace", S(app, 120.0f, 38.0f))) {
-      ImGui::CloseCurrentPopup();
-      StartRestoreBackup(app, app.restore_file);
+    if (ImGui::BeginTable("creations-pending-table", 4,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                              ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_ScrollY,
+                          ImVec2(0.0f, S(app, 145.0f)))) {
+      ImGui::TableSetupColumn("IN-GAME NAME", ImGuiTableColumnFlags_WidthStretch, 0.46f);
+      ImGui::TableSetupColumn("KIND", ImGuiTableColumnFlags_WidthFixed, S(app, 112.0f));
+      ImGui::TableSetupColumn("SLOT", ImGuiTableColumnFlags_WidthFixed, S(app, 72.0f));
+      ImGui::TableSetupColumn("ACTION", ImGuiTableColumnFlags_WidthStretch, 0.34f);
+      ImGui::TableHeadersRow();
+      for (size_t index = 0; index < app.pending_creations.size(); ++index) {
+        const CreationInfo& info = app.pending_creations[index];
+        ImGui::TableNextRow(ImGuiTableRowFlags_None, S(app, 31.0f));
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(info.display_name.c_str());
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(CreationKindText(info.kind));
+        ImGui::TableSetColumnIndex(2);
+        ImGui::TextUnformatted(info.slot.c_str());
+        ImGui::TableSetColumnIndex(3);
+        if (info.kind == CreationKind::kSave) {
+          const std::string review = "Review full save…##pending-save-" + std::to_string(index);
+          if (ImGui::SmallButton(review.c_str())) {
+            StartInspectFullSave(app, app.pending_creation_paths[index]);
+          }
+        } else if (index < app.pending_creation_replacements.size() && app.pending_creation_replacements[index]) {
+          ImGui::TextColored(kAccent, "Replace installed slot");
+        } else if (info.title_id_normalized) {
+          ImGui::TextColored(kAccent, "Store as WWE '13");
+        } else {
+          ImGui::TextColored(kMuted, "%s", info.package_name.c_str());
+        }
+      }
+      ImGui::EndTable();
+    }
+    for (const auto& info : app.pending_creations) {
+      if (info.title_id_normalized) {
+        DrawSecondaryWrapped(app,
+            "This entrance package is tagged 54510890. It will be stored as WWE '13 content (545108B4); "
+            "the selected source package will not be changed.", kAccent);
+        break;
+      }
+    }
+    if (!app.pending_creation_skipped.empty()) {
+      std::string skipped = "Skipped unsupported files: ";
+      for (size_t index = 0; index < app.pending_creation_skipped.size(); ++index) {
+        if (index) skipped += ", ";
+        skipped += app.pending_creation_skipped[index];
+      }
+      DrawSecondaryWrapped(app, skipped.c_str(), kDanger);
+    }
+    ImGui::Spacing();
+    bool has_creation = false;
+    for (const auto& info : app.pending_creations) has_creation = has_creation || info.kind != CreationKind::kSave;
+    if (has_creation && AccentButton(app, "Install creations", S(app, 180.0f, 38.0f))) {
+      bool has_replacements = false;
+      for (size_t index = 0; index < app.pending_creations.size() &&
+                              index < app.pending_creation_replacements.size(); ++index) {
+        has_replacements = has_replacements ||
+                           (app.pending_creations[index].kind != CreationKind::kSave &&
+                            app.pending_creation_replacements[index]);
+      }
+      if (has_replacements) app.confirm_replace_creations = true;
+      else StartImportCreations(app, false);
+    }
+    if (has_creation) {
+      ImGui::SameLine();
+      if (ImGui::Button("Clear", S(app, 90.0f, 38.0f))) {
+        app.pending_creation_paths.clear();
+        app.pending_creations.clear();
+        app.pending_creation_replacements.clear();
+        app.pending_creation_skipped.clear();
+        app.pending_pack_name.clear();
+      }
+    }
+    bool contains_save = std::any_of(app.pending_creations.begin(), app.pending_creations.end(),
+                                     [](const CreationInfo& info) { return info.kind == CreationKind::kSave; });
+    if (contains_save) {
+      ImGui::SameLine();
+      DrawTextDisabled(app, "Save packages use the separate full-save confirmation.");
+    }
+  }
+  EndPanel();
+}
+
+void DrawFullSaveReady(AppState& app) {
+  ImGui::Spacing();
+  if (BeginPanel(app, "creations-full-save", ImVec2(0.0f, S(app, 160.0f)))) {
+    DrawPanelHeading(app, "FULL SAVE READY", "This package replaces your current main saved game.");
+    ImGui::Text("%s · Save · %s", app.pending_full_save_info->display_name.c_str(),
+                app.pending_full_save_info->package_name.c_str());
+    if (AccentButton(app, "Replace current save…", S(app, 190.0f, 36.0f))) {
+      app.confirm_full_save = true;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", S(app, 120.0f, 38.0f))) ImGui::CloseCurrentPopup();
-    ImGui::EndPopup();
+    if (ImGui::Button("Cancel full save", S(app, 145.0f, 36.0f))) {
+      app.pending_full_save_info.reset();
+      app.pending_full_save_path.clear();
+      app.confirm_full_save = false;
+    }
   }
+  EndPanel();
+}
+
+void DrawContentModals(AppState& app) {
+  if (LauncherDialog(app, app.confirm_replace_creations, "Replace installed creations?",
+                     "Replace installed creations?",
+                     "One or more selected slots are already installed. Replace them? The launcher backs up your "
+                     "current save folder before changing any files.",
+                     "Replace slots") == DialogResult::Primary) {
+    StartImportCreations(app, true);
+  }
+
+  if (app.confirm_remove_creation) {
+    const auto selected = std::find_if(app.creations.begin(), app.creations.end(), [&](const CreationInfo& item) {
+      return item.package_name == app.pending_remove_creation;
+    });
+    const std::string name = selected == app.creations.end() ? app.pending_remove_creation : selected->display_name;
+    const DialogResult result = LauncherDialog(
+        app, app.confirm_remove_creation, "Remove this creation?", "Remove this creation?",
+        "Remove " + name + "? Your saves are backed up first.",
+        "Remove");
+    if (result == DialogResult::Primary) StartRemoveCreation(app, app.pending_remove_creation);
+    else if (result == DialogResult::Secondary) app.pending_remove_creation.clear();
+  }
+
+  if (app.confirm_remove_pack) {
+    size_t item_count = 0;
+    for (const auto& pack : app.content_packs) {
+      if (pack.id == app.pending_remove_pack) {
+        item_count = pack.packages.size();
+        break;
+      }
+    }
+    const std::string body = item_count > 0 ?
+        "This removes all " + std::to_string(item_count) +
+            " items in this pack and puts your save back the way it was before you imported it." :
+        "This removes this pack's items and puts your save back the way it was before you imported it.";
+    const DialogResult result =
+        LauncherDialog(app, app.confirm_remove_pack, "Remove this content pack?", "Remove this content pack?",
+                       body, "Remove pack");
+    if (result == DialogResult::Primary) StartRemovePack(app, app.pending_remove_pack);
+    else if (result == DialogResult::Secondary) app.pending_remove_pack.clear();
+  }
+
+  if (LauncherDialog(app, app.confirm_full_save, "Replace the current save?", "Replace the current save?",
+                     "This replaces your current save with the one you picked. Your current save is backed up first, "
+                     "and your other imported content stays installed.",
+                     "Replace save") == DialogResult::Primary) {
+    StartImportFullSave(app);
+  }
+}
+
+void DrawContent(AppState& app) {
+  if (!app.pending_creations.empty()) DrawPendingCreations(app);
+  if (app.pending_full_save_info) DrawFullSaveReady(app);
+  DrawContentTabs(app);
+  ImGui::Spacing();
+  switch (app.content_category) {
+    case ContentCategory::Superstars: DrawCreationCategory(app, CreationKind::kSuperstar); break;
+    case ContentCategory::Entrances: DrawCreationCategory(app, CreationKind::kEntrance); break;
+    case ContentCategory::Arenas: DrawCreationCategory(app, CreationKind::kArena); break;
+    case ContentCategory::Logos: DrawCreationCategory(app, CreationKind::kLogos); break;
+    case ContentCategory::Videos: DrawContentVideos(app); break;
+    case ContentCategory::Music: DrawContentMusic(app); break;
+    case ContentCategory::SaveData: DrawContentSaveData(app); break;
+  }
+  DrawContentModals(app);
   DrawProgress(app);
 }
+
 
 void DrawSidebar(AppState& app) {
   ImGui::PushStyleColor(ImGuiCol_ChildBg, kSidebar);
@@ -1951,7 +2911,9 @@ void DrawSidebar(AppState& app) {
     ImGui::TextColored(kSuccess, "Game files ready");
     ImGui::SetCursorPos(S(app, 13.0f, 42.0f));
     ImGui::PushFont(app.fonts.barlow_small);
-    ImGui::TextColored(kMuted, "TU 2.0.1.0 · %d DLC packs", app.game_files.dlc_installed);
+    ImGui::TextColored(kMuted, "TU 2.0.1.0 · %s",
+                       (std::to_string(app.game_files.dlc_installed) +
+                        (app.game_files.dlc_installed == 1 ? " DLC pack" : " DLC packs")).c_str());
     ImGui::PopFont();
   } else {
     ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(icon.x + S(app, 6.0f), icon.y + S(app, 7.0f)), S(app, 6.0f),
@@ -1969,7 +2931,7 @@ void DrawSidebar(AppState& app) {
   ImGui::PopStyleColor();
   ImGui::SetCursorPosY(ImGui::GetWindowHeight() - S(app, 36.0f));
   ImGui::PushFont(app.fonts.barlow_small);
-  ImGui::TextColored(kMuted, "v1.0 · Windows & Linux");
+  ImGui::TextColored(kMuted, "v1.1 · Windows & Linux");
   ImGui::PopFont();
   ImGui::EndChild();
   ImGui::PopStyleVar();
@@ -1984,11 +2946,17 @@ void DrawFooter(AppState& app) {
   ImGui::PushFont(app.fonts.barlow_small);
   ImGui::TextColored(kMuted, "Controls: keyboard or controller");
   ImGui::PopFont();
+  const char* content_label = "Manage Content";
   const char* report_label = "Save a Bug Report (logs + settings)";
   const char* readme_label = "Read Me";
+  const bool on_content_page = app.tab == Tab::Content;
   const ImGuiStyle& style = ImGui::GetStyle();
   const float button_padding = style.FramePadding.x;
-  const float links_width = app.fonts.barlow_small->CalcTextSizeA(
+  const float content_width = app.fonts.barlow_small->CalcTextSizeA(
+                                  app.fonts.barlow_small->LegacySize, 100000.0f, 0.0f, content_label).x +
+                              2.0f * button_padding + style.ItemSpacing.x;
+  const float links_width = (on_content_page ? 0.0f : content_width) +
+                            app.fonts.barlow_small->CalcTextSizeA(
                                 app.fonts.barlow_small->LegacySize, 100000.0f, 0.0f, report_label).x +
                             2.0f * button_padding + style.ItemSpacing.x +
                             app.fonts.barlow_small->CalcTextSizeA(
@@ -1997,6 +2965,13 @@ void DrawFooter(AppState& app) {
   ImGui::SetCursorScreenPos(ImVec2(right_edge - S(app, 44.0f) - links_width, window_pos.y + y + S(app, 14.0f)));
   ImGui::PushFont(app.fonts.barlow_small);
   ImGui::PushStyleColor(ImGuiCol_Text, kSecondary);
+  if (!on_content_page) {
+    if (ImGui::SmallButton(content_label)) {
+      app.tab = Tab::Content;
+      app.banner.clear();
+    }
+    ImGui::SameLine();
+  }
   if (ImGui::SmallButton(report_label)) StartBugReport(app);
   ImGui::SameLine();
   if (ImGui::SmallButton(readme_label)) {
@@ -2032,7 +3007,7 @@ void DrawMain(AppState& app) {
   ImGui::BeginChild("launcher-content", ImVec2(0.0f, 0.0f), ImGuiChildFlags_AlwaysUseWindowPadding,
                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
   ImGui::PushFont(app.fonts.oswald_semibold);
-  static const std::array<const char*, 6> page_titles{{"PLAY", "SETTINGS", "CONTROLS", "MUSIC", "GAME FILES", "SAVES"}};
+   static const std::array<const char*, 5> page_titles{{"PLAY", "SETTINGS", "CONTROLS", "CONTENT", "GAME FILES"}};
   ImGui::TextColored(kText, "%s", page_titles[static_cast<size_t>(app.tab)]);
   ImGui::PopFont();
   ImGui::Spacing();
@@ -2047,9 +3022,8 @@ void DrawMain(AppState& app) {
     case Tab::Play: DrawPlay(app); break;
     case Tab::Settings: DrawSettings(app); break;
     case Tab::Controls: DrawControls(app); break;
-    case Tab::Music: DrawMusic(app); break;
+    case Tab::Content: DrawContent(app); break;
     case Tab::GameFiles: DrawGameFiles(app); break;
-    case Tab::Saves: DrawSaves(app); break;
   }
   ImGui::EndChild();
   DrawFooter(app);
@@ -2090,8 +3064,23 @@ void ApplyFitToWindow(AppState& app) {
 void DrawFrame(AppState& app) {
   ImGui_ImplSDLRenderer3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
+  if (app.screenshot_mode && app.test_pixel_density > 0.0f) {
+    ImGuiIO& io = ImGui::GetIO();
+    int window_width = 0;
+    int window_height = 0;
+    SDL_GetWindowSize(app.window, &window_width, &window_height);
+    io.DisplaySize = ImVec2(window_width / app.test_pixel_density,
+                            window_height / app.test_pixel_density);
+    io.DisplayFramebufferScale =
+        ImVec2(app.test_pixel_density, app.test_pixel_density);
+  }
   ApplyFitToWindow(app);
   ImGui::NewFrame();
+  if (app.screenshot_mode) {
+    // The modal dim fades in over the first frames; a capture taken immediately would show a barely-darkened
+    // page. Hold the fade at full so review screenshots match how the dialog looks once it has settled.
+    ImGui::GetCurrentContext()->DimBgRatio = 1.0f;
+  }
   DrawMain(app);
   const ImVec2 display_size = ImGui::GetIO().DisplaySize;
   const float footer_y = display_size.y - S(app, 50.0f);
@@ -2101,15 +3090,21 @@ void DrawFrame(AppState& app) {
   ImGui::Render();
   SDL_SetRenderDrawColor(app.renderer, 15, 16, 20, 255);
   SDL_RenderClear(app.renderer);
-  // SDL scales geometry and clip rectangles; the ImGui backend skips its own scaling when set.
-  SDL_SetRenderScale(app.renderer, app.fit_scale, app.fit_scale);
+  // Map ImGui logical coordinates to framebuffer pixels, then apply the
+  // fit-to-window transform. The ImGui SDL renderer backend leaves clip rects
+  // in logical coordinates when SDL renderer scaling is active, so geometry
+  // and scissoring receive the same transform exactly once.
+  const ImVec2 framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale;
+  SDL_SetRenderScale(app.renderer, app.fit_scale * framebuffer_scale.x,
+                     app.fit_scale * framebuffer_scale.y);
   ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), app.renderer);
   SDL_SetRenderScale(app.renderer, 1.0f, 1.0f);
 }
 
-void CaptureTab(AppState& app, Tab tab) {
-  static const std::array<const char*, 6> names{{"play", "settings", "controls", "music", "game-files", "saves"}};
-  app.tab = tab;
+void SaveScreenshotFrame(AppState& app, const std::string& name) {
+  // Draw twice: auto-sized content (popups, popup modals) only settles on its second frame, and the
+  // capture reads the backbuffer directly, so without the first pass the modal would be missing.
+  DrawFrame(app);
   DrawFrame(app);
   SDL_Surface* pixels = SDL_RenderReadPixels(app.renderer, nullptr);
   if (!pixels) {
@@ -2117,7 +3112,7 @@ void CaptureTab(AppState& app, Tab tab) {
     app.running = false;
     return;
   }
-  const fs::path file = app.screenshot_dir / (std::string(names[static_cast<size_t>(tab)]) + ".png");
+  const fs::path file = app.screenshot_dir / name;
   const bool saved = SDL_SavePNG(pixels, PathUtf8(file).c_str());
   SDL_DestroySurface(pixels);
   if (!saved) {
@@ -2128,9 +3123,114 @@ void CaptureTab(AppState& app, Tab tab) {
   SDL_RenderPresent(app.renderer);
 }
 
+void CaptureTab(AppState& app, Tab tab) {
+  static const std::array<const char*, 5> names{{"play", "settings", "controls", "content", "game-files"}};
+  app.tab = tab;
+  SaveScreenshotFrame(app, std::string(names[static_cast<size_t>(tab)]) + ".png");
+}
+
+// Captures the current content category (plus the remove-confirmation states after the six visible categories).
+// Returns false once every state has been captured, so the caller knows to finish.
+bool CaptureContentState(AppState& app) {
+  static const std::array<ContentCategory, 6> categories{{
+      ContentCategory::Superstars, ContentCategory::Entrances, ContentCategory::Arenas, ContentCategory::Logos,
+      ContentCategory::Music, ContentCategory::SaveData,
+  }};
+  static const std::array<const char*, 6> names{{
+      "superstars", "entrances", "arenas", "logos", "music", "save-data",
+  }};
+  if (app.screenshot_index < categories.size()) {
+    app.tab = Tab::Content;
+    app.content_category = categories[app.screenshot_index];
+    SaveScreenshotFrame(app, std::string(names[app.screenshot_index]) + ".png");
+    ++app.screenshot_index;
+    return true;
+  }
+  if (app.screenshot_index == categories.size()) {
+    // A single CAW inside a pack: its Remove button is greyed out and the plain pack note is shown.
+    app.tab = Tab::Content;
+    app.content_category = ContentCategory::Superstars;
+    app.selected_creation.clear();
+    for (const auto& creation : app.creations) {
+      if (creation.kind == CreationKind::kSuperstar) {
+        app.selected_creation = creation.package_name;
+        break;
+      }
+    }
+    SaveScreenshotFrame(app, "remove-caw-confirm.png");
+    ++app.screenshot_index;
+    return true;
+  }
+  if (app.screenshot_index == categories.size() + 1) {
+    // The whole-pack removal confirm modal.
+    app.tab = Tab::Content;
+    app.content_category = ContentCategory::SaveData;
+    if (!app.content_packs.empty()) {
+      app.pending_remove_pack = app.content_packs.front().id;
+      app.confirm_remove_pack = true;
+    }
+    SaveScreenshotFrame(app, "remove-pack-confirm.png");
+    app.pending_remove_pack.clear();
+    app.confirm_remove_pack = false;
+    ++app.screenshot_index;
+    return true;
+  }
+  if (app.screenshot_index == categories.size() + 2) {
+    // Each remaining confirmation dialog, captured by opening it directly.
+    app.tab = Tab::Content;
+    app.content_category = ContentCategory::SaveData;
+    if (!app.backups.empty()) {
+      app.restore_file = app.backups.front().file;
+      app.confirm_restore_backup = true;
+    }
+    SaveScreenshotFrame(app, "dialog-restore-backup.png");
+    app.confirm_restore_backup = false;
+    ++app.screenshot_index;
+    return true;
+  }
+  if (app.screenshot_index == categories.size() + 3) {
+    app.tab = Tab::Content;
+    app.content_category = ContentCategory::SaveData;
+    app.confirm_replace_creations = true;
+    SaveScreenshotFrame(app, "dialog-replace-creations.png");
+    app.confirm_replace_creations = false;
+    ++app.screenshot_index;
+    return true;
+  }
+  if (app.screenshot_index == categories.size() + 4) {
+    app.tab = Tab::Content;
+    app.content_category = ContentCategory::Superstars;
+    if (!app.creations.empty()) app.pending_remove_creation = app.creations.front().package_name;
+    app.confirm_remove_creation = true;
+    SaveScreenshotFrame(app, "dialog-remove-creation.png");
+    app.confirm_remove_creation = false;
+    app.pending_remove_creation.clear();
+    ++app.screenshot_index;
+    return true;
+  }
+  if (app.screenshot_index == categories.size() + 5) {
+    app.tab = Tab::Content;
+    app.content_category = ContentCategory::SaveData;
+    app.confirm_full_save = true;
+    SaveScreenshotFrame(app, "dialog-replace-save.png");
+    app.confirm_full_save = false;
+    ++app.screenshot_index;
+    return true;
+  }
+  return false;
+}
+
 void LoadFonts(AppState& app) {
   ImGuiIO& io = ImGui::GetIO();
-  float scale = SDL_GetWindowDisplayScale(app.window);
+  float display_scale = SDL_GetWindowDisplayScale(app.window);
+  float pixel_density = GetWindowPixelDensity(app);
+  if (display_scale < 0.5f || !std::isfinite(display_scale)) display_scale = 1.0f;
+  if (pixel_density < 0.5f || !std::isfinite(pixel_density)) pixel_density = 1.0f;
+  // SDL_GetWindowDisplayScale is the combined expected content scale, which
+  // includes pixel density. ImGui layout coordinates are logical window
+  // coordinates, so only apply the content scale not already represented by
+  // DisplayFramebufferScale.
+  float scale = display_scale / pixel_density;
   if (scale < 0.5f || !std::isfinite(scale)) scale = 1.0f;
   auto add = [scale](const unsigned char* data, unsigned int size, float pixels) {
     ImFont* font = ImGui::GetIO().Fonts->AddFontFromMemoryCompressedTTF(data, static_cast<int>(size), pixels * scale);
@@ -2193,18 +3293,37 @@ bool Initialize(AppState& app, int argc, char** argv) {
         }
       }
     }
+    if (argument == "--test-pixel-density" && i + 1 < argc) {
+      const float density = std::strtof(argv[++i], nullptr);
+      if (density >= 0.5f && density <= 4.0f && std::isfinite(density)) {
+        app.test_pixel_density = density;
+      }
+    }
     if (argument == "--test-drop-tab" && i + 1 < argc) {
       const std::string tab = argv[++i];
-      if (tab == "music") app.test_drop_tab = Tab::Music;
+      if (tab == "music") { app.test_drop_tab = Tab::Content; app.content_category = ContentCategory::Music; }
       else if (tab == "game-files") app.test_drop_tab = Tab::GameFiles;
+      else if (tab == "creations") app.test_drop_tab = Tab::Content;
     }
     if (argument == "--test-drop-file" && i + 1 < argc) {
       app.test_drop_files.push_back(Utf8Path(argv[++i]));
+    }
+    if (argument == "--test-import-folder" && i + 1 < argc) {
+      app.test_import_folder = Utf8Path(argv[++i]);
     }
     if (argument == "--screenshot-tabs") {
       app.screenshot_mode = true;
       if (i + 1 < argc && argv[i + 1][0] != '-') app.screenshot_dir = Utf8Path(argv[++i]);
       else app.screenshot_dir = fs::path("out/l1/ui");
+    }
+    if (argument == "--screenshot-content") {
+      app.screenshot_mode = true;
+      app.screenshot_content_mode = true;
+      if (i + 1 < argc && argv[i + 1][0] != '-') app.screenshot_dir = Utf8Path(argv[++i]);
+      else app.screenshot_dir = fs::path("out/l1/ui");
+    }
+    if (argument == "--user-data" && i + 1 < argc) {
+      app.userdata_override = Utf8Path(argv[++i]);
     }
   }
   if (app.screenshot_mode) {
@@ -2258,6 +3377,8 @@ bool Initialize(AppState& app, int argc, char** argv) {
   style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.15f, 0.16f, 0.19f, 1.0f);
   style.Colors[ImGuiCol_ButtonActive] = kAccent;
   style.Colors[ImGuiCol_PlotHistogram] = kAccent;
+  // Dialogs sit on the launcher panel colour, so the page behind must dim noticeably darker.
+  style.Colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.02f, 0.023f, 0.03f, 0.72f);
   style.WindowRounding = 0.0f;
   style.ChildRounding = 14.0f;
   style.FrameRounding = 8.0f;
@@ -2322,7 +3443,9 @@ void HandleEvent(AppState& app, const SDL_Event& event) {
       if (event.window.windowID == SDL_GetWindowID(app.window)) app.running = false;
       break;
     case SDL_EVENT_DROP_FILE:
-      if (app.tab == Tab::Music || app.tab == Tab::GameFiles) QueueDrop(app, event.drop.data);
+      if (app.tab == Tab::Content || app.tab == Tab::GameFiles) {
+        QueueDrop(app, event.drop.data);
+      }
       break;
     case SDL_EVENT_KEY_DOWN:
       if (event.key.key == SDLK_RETURN && !event.key.repeat && app.initialized && app.tab == Tab::Play) {
@@ -2383,10 +3506,15 @@ int main(int argc, char** argv) {
     SDL_GetRenderVSync(app.renderer, &vsync);
     int width = 0;
     int height = 0;
+    int logical_width = 0;
+    int logical_height = 0;
     SDL_GetWindowSizeInPixels(app.window, &width, &height);
+    SDL_GetWindowSize(app.window, &logical_width, &logical_height);
     const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(app.window));
-    PerfLog("renderer=%s vsync=%d window=%dx%d display_scale=%.2f refresh=%.1f Hz video_driver=%s",
-            SDL_GetRendererName(app.renderer), vsync, width, height, SDL_GetWindowDisplayScale(app.window),
+    PerfLog("renderer=%s vsync=%d window_pixels=%dx%d window_coords=%dx%d pixel_density=%.2f "
+            "display_scale=%.2f ui_scale=%.2f refresh=%.1f Hz video_driver=%s",
+            SDL_GetRendererName(app.renderer), vsync, width, height, logical_width, logical_height,
+            GetWindowPixelDensity(app), SDL_GetWindowDisplayScale(app.window), app.display_scale,
             mode ? mode->refresh_rate : 0.0f, SDL_GetCurrentVideoDriver());
   }
   int quiet_frames = 0;
@@ -2428,13 +3556,20 @@ int main(int argc, char** argv) {
     }
     ProcessDrops(app);
     if (app.screenshot_mode && app.initialized && !app.job.active.load()) {
-      if (app.screenshot_index >= kTabs.size()) {
-        app.running = false;
-        break;
+      if (app.screenshot_content_mode) {
+        if (!CaptureContentState(app)) {
+          app.running = false;
+          break;
+        }
+      } else {
+        if (app.screenshot_index >= kTabs.size()) {
+          app.running = false;
+          break;
+        }
+        const Tab tab = kTabs[app.screenshot_index].first;
+        CaptureTab(app, tab);
+        ++app.screenshot_index;
       }
-      const Tab tab = kTabs[app.screenshot_index].first;
-      CaptureTab(app, tab);
-      ++app.screenshot_index;
       continue;
     }
     work_ns = SDL_GetTicksNS() - work_start;

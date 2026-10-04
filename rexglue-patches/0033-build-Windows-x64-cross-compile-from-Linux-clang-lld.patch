@@ -1,7 +1,7 @@
 From 097f61a85c11ec3eb7848722e6a88acef6b98437 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 13:42:58 -0700
-Subject: [PATCH 33/86] build: Windows x64 cross-compile from Linux (clang +
+Subject: [PATCH 33/89] build: Windows x64 cross-compile from Linux (clang +
  lld-link + xwin)
 
 - cmake/toolchains/win-amd64-xwin.cmake: clang/clang++ targeting

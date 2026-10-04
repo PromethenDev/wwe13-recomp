@@ -22,13 +22,9 @@ LINUX_EXE=${LINUX_EXE:-}
 # contain the game's own shader microcode, so they are NOT shipped unless the owner opts in by setting these.
 WIN_SHADER_SEED=${WIN_SHADER_SEED:-}
 LINUX_SHADER_SEED=${LINUX_SHADER_SEED:-}
-if [[ -z "${ENHANCED_EXE:-}" ]]; then
-  if [[ -f "$LAUNCHER_BUILD/wwe13-enhanced.exe" ]]; then
-    ENHANCED_EXE=$LAUNCHER_BUILD/wwe13-enhanced.exe
-  else
-    ENHANCED_EXE=$LAUNCHER_BUILD/RelWithDebInfo/wwe13-enhanced.exe
-  fi
-fi
+# v1.0.1: only the main launcher ships (WWE13 Launcher.exe / wwe13-launcher). The old
+# wwe13-enhanced.exe and the wwe13.bat / wwe13-debug.bat start scripts are no longer packaged;
+# the launcher's "Save a Bug Report" button and the game log's crash report cover bug reports.
 
 shopt -s nullglob
 if [[ -z "$WIN_EXE" ]]; then
@@ -65,11 +61,9 @@ FFMPEG_OVERLAY="$SDK_ROOT/thirdparty/ffmpeg-overlay"
 FFMPEG_COMMIT=$(git -C "$SDK_FFMPEG" rev-parse HEAD)
 SOURCE_ARCHIVE="$OUT_DIR/ffmpeg-source-$FFMPEG_COMMIT.zip"
 
-for input in "$WIN_EXE" "$LINUX_EXE" "$ENHANCED_EXE" \
+for input in "$WIN_EXE" "$LINUX_EXE" \
              "$LAUNCHER2_WIN_EXE" "$LAUNCHER2_LINUX_EXE" \
              "$ROOT/launcher2/thirdparty/miniz/miniz.h" \
-             "$ROOT/tools/windows/wwe13.bat" \
-             "$ROOT/tools/windows/wwe13-debug.bat" \
              "$ROOT/README.md" "$ROOT/DISCLAIMER.md" "$ROOT/LICENSE" \
              "$SDK_ROOT/LICENSE" "$SDK_FFMPEG/COPYING.LGPLv2.1" \
              "$SDK_ROOT/thirdparty/CMakeLists.txt"; do
@@ -95,7 +89,6 @@ cp "$WIN_EXE" "$STAGE/wwe13.exe"
 cp "${WIN_AVCODEC_DLLS[@]}" "${WIN_AVUTIL_DLLS[@]}" "$STAGE/"
 cp "$LINUX_EXE" "$STAGE/Linux-x86_64/wwe13"
 cp "${LINUX_AVCODEC_SOS[@]}" "${LINUX_AVUTIL_SOS[@]}" "$STAGE/Linux-x86_64/"
-cp "$ENHANCED_EXE" "$STAGE/wwe13-enhanced.exe"
 cp "$LAUNCHER2_WIN_EXE" "$STAGE/WWE13 Launcher.exe"
 cp "$LAUNCHER2_LINUX_EXE" "$STAGE/Linux-x86_64/wwe13-launcher"
 for seed in "$WIN_SHADER_SEED:$STAGE/shader-cache:68" "$LINUX_SHADER_SEED:$STAGE/Linux-x86_64/shader-cache:66"; do
@@ -137,6 +130,11 @@ printf '%s\n' "$keymap" > "$STAGE/Linux-x86_64/wwe13.toml"
 # Like the Windows exe (whose debug info stays in the unshipped .pdb), ship Linux binaries without
 # DWARF debug info: 342 -> 109 MB for the game. --strip-debug keeps the symbol table and code.
 strip --strip-debug "$STAGE/Linux-x86_64/wwe13" "$STAGE/Linux-x86_64/wwe13-launcher"
+# Build paths embedded by the compilers name the build account (/home/<user>/...): rewrite them to a neutral path of the
+# same length in every shipped binary (tools/scrub-build-paths.py fails if the account name would remain).
+python3 "$ROOT/tools/scrub-build-paths.py" --old "$HOME/" --new "$(python3 -c 'import sys; n=len(sys.argv[1]); print(("/build/src/" + "x" * n)[:n-1] + "/")' "$HOME/")" \
+  --account "$(basename "$HOME")" "$STAGE/wwe13.exe" "$STAGE/WWE13 Launcher.exe" "$STAGE"/*.dll \
+  "$STAGE/Linux-x86_64/wwe13" "$STAGE/Linux-x86_64/wwe13-launcher" "$STAGE"/Linux-x86_64/lib*.so*
 mkdir -p "$STAGE/licenses/launcher"
 cp "$ROOT"/launcher2/ui/fonts/*-OFL.txt "$STAGE/licenses/launcher/"
 # miniz keeps its public-domain (unlicense) dedication at the end of the header.
@@ -149,8 +147,6 @@ if start < 0:
 end = text.find("*/", start)
 open(sys.argv[2], "w", encoding="utf-8").write(text[start:end if end > 0 else None].strip() + "\n")
 PY
-cp "$ROOT/tools/windows/wwe13.bat" "$STAGE/wwe13.bat"
-cp "$ROOT/tools/windows/wwe13-debug.bat" "$STAGE/wwe13-debug.bat"
 cp "$ROOT/README.md" "$ROOT/DISCLAIMER.md" "$ROOT/LICENSE" "$STAGE/"
 cp "$SDK_FFMPEG/COPYING.LGPLv2.1" "$STAGE/licenses/FFmpeg-LGPL-2.1.txt"
 

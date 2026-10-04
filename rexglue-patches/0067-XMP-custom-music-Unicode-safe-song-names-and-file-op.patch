@@ -1,13 +1,13 @@
 From a19db2cb5f0a485499cd0750331752ee2f97375f Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 29 Sep 2026 07:27:38 -0700
-Subject: [PATCH 67/86] XMP custom music: Unicode-safe song names and file
+Subject: [PATCH 67/89] XMP custom music: Unicode-safe song names and file
  opens on Windows (path::string() threw for names outside the ANSI code page,
  e.g. superscript letters -> game crash on opening the entrance editor); _w
  decoder opens + _wfopen for stb_vorbis; folder scan and decode wrapped so a
  bad file is logged and skipped
 
-Reproduced under Wine with the owner's file name on 63f2a9e4 (0xE06D7363 crash); fixed build lists and plays it.
+Reproduced under Wine with a player's file name on 63f2a9e4 (0xE06D7363 crash); fixed build lists and plays it.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---

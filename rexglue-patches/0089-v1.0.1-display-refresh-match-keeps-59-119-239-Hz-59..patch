@@ -1,0 +1,33 @@
+From cc63f762ba563ec529f9cb1711ad8e96132a4abf Mon Sep 17 00:00:00 2001
+From: PromethenDev <PromethenDev@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 17:38:24 -0700
+Subject: [PATCH 89/89] v1.0.1: display refresh match keeps 59/119/239 Hz
+ (59.94-style) modes - the 59->60 Hz switch re-synced the display and left the
+ swapchain black on an Intel UHD 630 until Alt+Tab
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/ui/window_win.cpp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/ui/window_win.cpp b/src/ui/window_win.cpp
+index 2a38ebd..1d53b36 100644
+--- a/src/ui/window_win.cpp
++++ b/src/ui/window_win.cpp
+@@ -774,6 +774,16 @@ void Win32Window::ApplyDisplayRefreshMatch(
+     REXLOG_INFO("[display-refresh-match] apply result: not attempted");
+     return;
+   }
++  // 59/119/239 Hz are NTSC-style 59.94 Hz multiples (common on TVs over HDMI). Switching them
++  // to 60/120/240 Hz makes the display re-sync, and on an Intel UHD 630 the swapchain created
++  // right after the switch stayed black until Alt+Tab (an Intel UHD 630 test PC, 2026-10-03). They
++  // are within 0.1% of a 60 Hz multiple, so keep the original mode.
++  if ((original_mode.dmDisplayFrequency + 1) % 60 == 0) {
++    REXLOG_INFO(
++        "[display-refresh-match] chosen mode: none (original refresh is a 59.94 Hz-style multiple of 60)");
++    REXLOG_INFO("[display-refresh-match] apply result: not attempted");
++    return;
++  }
+ 
+   DEVMODEW chosen_mode = {};
+   DWORD chosen_refresh = 0;

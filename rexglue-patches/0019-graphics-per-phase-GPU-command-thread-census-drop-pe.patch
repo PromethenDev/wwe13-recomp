@@ -1,7 +1,7 @@
 From 6c599edcf6591a533d87cd0b20ce1f0cbc6a4537 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 12:43:28 -0700
-Subject: [PATCH 19/86] graphics: per-phase GPU command thread census; drop
+Subject: [PATCH 19/89] graphics: per-phase GPU command thread census; drop
  per-write/per-draw lookup overhead
 
 Diagnostics (env-gated by WWE13_RATE_CENSUS, no-op otherwise): exclusive

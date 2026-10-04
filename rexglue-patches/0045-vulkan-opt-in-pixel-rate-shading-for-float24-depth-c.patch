@@ -1,7 +1,7 @@
 From 5858f4ba40248c5c8fef496fa376d476429e2daf Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 12:05:40 -0700
-Subject: [PATCH 45/86] vulkan: opt-in pixel-rate shading for float24 depth
+Subject: [PATCH 45/89] vulkan: opt-in pixel-rate shading for float24 depth
  conversion
 
 With depth_float24_convert_in_pixel_shader on and 4xMSAA render targets,

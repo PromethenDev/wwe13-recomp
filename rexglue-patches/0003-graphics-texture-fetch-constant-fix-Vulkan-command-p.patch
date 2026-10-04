@@ -1,7 +1,7 @@
 From 1c256349a86fe319218bf8a0b845cc8a8ba76cb4 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 12:48:59 -0700
-Subject: [PATCH 03/86] graphics: texture fetch-constant fix, Vulkan command
+Subject: [PATCH 03/89] graphics: texture fetch-constant fix, Vulkan command
  processor, content probe
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

@@ -1,7 +1,7 @@
 From 31c0a45f7432245e049f9f9c341972ab38180ab7 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 18:53:07 -0700
-Subject: [PATCH 10/86] vulkan: add descriptors mode to
+Subject: [PATCH 10/89] vulkan: add descriptors mode to
  debug_periodic_cache_clear
 
 Clears only the transient descriptor pools, to separate stale cached

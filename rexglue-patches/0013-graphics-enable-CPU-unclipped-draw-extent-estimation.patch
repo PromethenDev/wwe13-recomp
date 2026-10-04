@@ -1,7 +1,7 @@
 From 0b67292185cfe1a779cc1f5971ef9dc7dc3f560e Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 20:41:36 -0700
-Subject: [PATCH 13/86] graphics: enable CPU unclipped-draw extent estimation
+Subject: [PATCH 13/89] graphics: enable CPU unclipped-draw extent estimation
  (match upstream Xenia); fixes 4x depth surface EDRAM wrap
 
 ---

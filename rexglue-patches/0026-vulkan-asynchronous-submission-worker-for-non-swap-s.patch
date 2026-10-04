@@ -1,7 +1,7 @@
 From 4509bff63b91117d2847b19992fc4f4f8614d72d Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 21:05:40 -0700
-Subject: [PATCH 26/86] vulkan: asynchronous submission worker for non-swap
+Subject: [PATCH 26/89] vulkan: asynchronous submission worker for non-swap
  submissions
 
 The GPU command thread replayed the deferred command buffer into a

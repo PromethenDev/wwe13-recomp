@@ -1,7 +1,7 @@
 From b7d5504c93ece7fdf73571f6252522d07fcc7e61 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 1 Oct 2026 15:33:22 -0700
-Subject: [PATCH 80/86] Input: PC keyboard typing + Ctrl+V paste for titles'
+Subject: [PATCH 80/89] Input: PC keyboard typing + Ctrl+V paste for titles'
  text entry
 
 - MnK: typed characters (OnKeyChar) become VK_PACKET+unicode keystrokes for titles that read

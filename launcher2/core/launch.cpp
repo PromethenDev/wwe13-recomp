@@ -7,19 +7,25 @@
 #include "internal/util.h"
 
 #include <algorithm>
+#include <thread>
 #include <array>
 #include <chrono>
+#include <cstdlib>
 #include <map>
 #include <cwchar>
 #include <string>
 #include <system_error>
 
 #ifdef _WIN32
+#include <intrin.h>
+#endif
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
 #include <cerrno>
 #include <spawn.h>
+#include <sys/wait.h>
 #include <unistd.h>
 extern char** environ;
 #endif
@@ -212,12 +218,49 @@ LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings& settings,
       {"WWE13_F24_PIXEL_RATE", "1"},
       {"WWE13_INTERNAL_RES", resolution.internal ? resolution.internal : ""},
       {"WWE13_SCENE_AA", effective.anti_aliasing == AntiAliasing::kFaster2x ? "2x" : ""}};
+#ifndef _WIN32
+  // RenderDoc's implicit Vulkan layer draws a capture banner over the game. Disable only that layer
+  // for the game process; keep other loader filters already chosen by the user (for example, Steam
+  // Overlay or MangoHud) intact.
+  std::string layers_to_disable;
+  if (const char* existing = std::getenv("VK_LOADER_LAYERS_DISABLE")) {
+    layers_to_disable = existing;
+  }
+  if (!layers_to_disable.empty() && layers_to_disable.back() != ',') {
+    layers_to_disable.push_back(',');
+  }
+  layers_to_disable += "VK_LAYER_RENDERDOC_Capture";
+  plan.environment.emplace_back("VK_LOADER_LAYERS_DISABLE", std::move(layers_to_disable));
+#endif
   if (effective.frame_rate == FrameRate::kKeep60) plan.environment.emplace_back("WWE13_KEEP_60", "1");
   else if (effective.frame_rate == FrameRate::kLock30) plan.environment.emplace_back("WWE13_LOCK_30", "1");
   return plan;
 }
 
-Result StartGame(const LaunchPlan& plan) {
+#ifdef _WIN32
+namespace {
+// The Windows game build targets x86-64-v3 (AVX2/FMA/BMI2): on an older processor it would close
+// instantly with an illegal instruction. Check first and say so (GitHub #6).
+bool ProcessorSupportsGameBuild() {
+  int regs[4] = {};
+  __cpuid(regs, 0);
+  if (regs[0] < 7) return false;
+  __cpuid(regs, 1);
+  const bool osxsave = (regs[2] & (1 << 27)) != 0;
+  const bool avx = (regs[2] & (1 << 28)) != 0;
+  const bool fma = (regs[2] & (1 << 12)) != 0;
+  if (!osxsave || !avx || !fma) return false;
+  if ((_xgetbv(0) & 0x6) != 0x6) return false;  // OS saves the YMM registers
+  __cpuidex(regs, 7, 0);
+  const bool avx2 = (regs[1] & (1 << 5)) != 0;
+  const bool bmi1 = (regs[1] & (1 << 3)) != 0;
+  const bool bmi2 = (regs[1] & (1 << 8)) != 0;
+  return avx2 && bmi1 && bmi2;
+}
+}  // namespace
+#endif
+
+Result StartGame(const LaunchPlan& plan, double watch_seconds) {
   try {
     std::error_code error;
     for (const std::string& argument : plan.arguments) {
@@ -237,6 +280,11 @@ Result StartGame(const LaunchPlan& plan) {
       return Result::Fail("The game program could not be found next to the launcher.");
     }
 #ifdef _WIN32
+    if (!ProcessorSupportsGameBuild()) {
+      return Result::Fail(
+          "This PC's processor is too old for WWE '13 PC: it needs AVX2 (Intel Core 4th generation, "
+          "AMD Ryzen or newer). The game cannot start on this processor.");
+    }
     std::wstring command = QuoteArgument(plan.executable.wstring());
     for (const std::string& argument : plan.arguments) {
       command.push_back(L' ');
@@ -257,7 +305,13 @@ Result StartGame(const LaunchPlan& plan) {
       return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
     }
     CloseHandle(process.hThread);
+    bool closed_early = false;
+    if (watch_seconds > 0.0 &&
+        WaitForSingleObject(process.hProcess, DWORD(watch_seconds * 1000.0)) == WAIT_OBJECT_0) {
+      closed_early = true;
+    }
     CloseHandle(process.hProcess);
+    if (closed_early) return Result::Fail(kGameClosedEarlyMessage);
     return Result::Ok();
 #else
     std::vector<std::string> arguments;
@@ -299,6 +353,17 @@ Result StartGame(const LaunchPlan& plan) {
     posix_spawn_file_actions_destroy(&actions);
     if (status != 0) {
       return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
+    }
+    if (watch_seconds > 0.0) {
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(int64_t(watch_seconds * 1000.0));
+      while (std::chrono::steady_clock::now() < deadline) {
+        int wait_status = 0;
+        const pid_t done = waitpid(child, &wait_status, WNOHANG);
+        if (done == child) return Result::Fail(kGameClosedEarlyMessage);
+        if (done < 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
     }
     return Result::Ok();
 #endif

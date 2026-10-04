@@ -4,6 +4,7 @@
 #include "internal/util.h"
 
 #include <algorithm>
+#include <string_view>
 #include <chrono>
 #include <cctype>
 #include <set>
@@ -66,7 +67,25 @@ bool HasAnyFiles(const fs::path& directory) {
   return false;
 }
 
-bool BuildSaveArchive(const Paths& paths, const fs::path& destination) {
+// Imported creation packages (CAWs, entrances, arenas, logos) live next to the save but are large and
+// re-importable; the pre-launch backup skips them so it stays small and fast (v1.1: a 1.9 GB pack made every
+// launch take ~20 s and 1.26 GB of disk).
+bool IsCreationPath(const fs::path& relative) {
+  for (const auto& component : relative) {
+    std::string name = internal::PathToUtf8(component);
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (name.size() > 7 && name.ends_with(".header")) name.resize(name.size() - 7);
+    for (const char* extension : {".cas", ".enc", ".car", ".pt"}) {
+      if (name.ends_with(extension)) return true;
+    }
+  }
+  return false;
+}
+
+constexpr const char* kSavesOnlyMarker = "wwe13-backup-saves-only.txt";
+
+bool BuildSaveArchive(const Paths& paths, const fs::path& destination, bool include_creations) {
   const fs::path account = paths.userdata_dir / std::string(kAccountId);
   std::vector<internal::ZipEntry> entries;
   std::error_code error;
@@ -94,6 +113,7 @@ bool BuildSaveArchive(const Paths& paths, const fs::path& destination) {
         bool escaped = false;
         for (const auto& component : relative) if (component == "..") escaped = true;
         if (escaped) continue;
+        if (!include_creations && IsCreationPath(relative)) continue;
         internal::ZipEntry item;
         std::string archive_relative = internal::PathToUtf8(relative);
         std::replace(archive_relative.begin(), archive_relative.end(), '\\', '/');
@@ -102,6 +122,13 @@ bool BuildSaveArchive(const Paths& paths, const fs::path& destination) {
         entries.push_back(std::move(item));
       }
     }
+  }
+  if (!include_creations) {
+    internal::ZipEntry marker;
+    marker.name = kSavesOnlyMarker;
+    const std::string text = "Saved games only: imported creations were not included (they stay installed on restore).\n";
+    marker.bytes.assign(text.begin(), text.end());
+    entries.push_back(std::move(marker));
   }
   error.clear();
   if (fs::is_regular_file(paths.settings_file, error) && !error) {
@@ -185,7 +212,7 @@ std::vector<BackupInfo> ListBackups(const Paths& paths) {
   return backups;
 }
 
-Result BackupSaves(const Paths& paths, bool automatic, BackupInfo* created) {
+Result BackupSaves(const Paths& paths, bool automatic, BackupInfo* created, bool include_creations) {
   try {
     const fs::path account = paths.userdata_dir / std::string(kAccountId);
     if (!HasAnyFiles(account) && !fs::is_regular_file(paths.settings_file)) {
@@ -196,7 +223,7 @@ Result BackupSaves(const Paths& paths, bool automatic, BackupInfo* created) {
       return Result::Fail("The launcher could not create the backup folder.");
     }
     const fs::path destination = UniqueBackupPath(paths, BackupTimestamp(), automatic);
-    if (!BuildSaveArchive(paths, destination)) {
+    if (!BuildSaveArchive(paths, destination, include_creations)) {
       std::error_code error;
       fs::remove(destination, error);
       return Result::Fail("The launcher could not create a save backup.");
@@ -235,11 +262,16 @@ Result RestoreBackup(const Paths& paths, const fs::path& backup_zip) {
       return Result::Fail("The launcher could not prepare the restore folder.");
     }
     bool found_save = false;
+    bool saves_only = false;
     std::optional<std::vector<uint8_t>> ini_data;
     for (mz_uint index = 0; index < zip.Count(); ++index) {
       if (zip.IsDirectory(index)) continue;
       mz_zip_archive_file_stat stat{};
       if (!zip.Stat(index, stat)) continue;
+      if (std::string_view(stat.m_filename) == kSavesOnlyMarker) {
+        saves_only = true;
+        continue;
+      }
       const auto relative_name = NormalizeArchiveName(stat.m_filename);
       if (!relative_name) continue;
       std::vector<uint8_t> data;
@@ -296,7 +328,39 @@ Result RestoreBackup(const Paths& paths, const fs::path& backup_zip) {
       fs::remove_all(temp_root, error);
       return Result::Fail("The launcher could not replace the current saved game.");
     }
-    if (moved_old) fs::remove_all(old_account, error);
+    bool keep_old = false;
+    if (saves_only && moved_old) {
+      // A "saves only" backup does not carry the imported creations: move the installed ones from the
+      // previous folder into the restored one. On any failure keep the previous folder (no data loss).
+      std::vector<fs::path> creation_paths;
+      fs::recursive_directory_iterator iterator(old_account, fs::directory_options::skip_permission_denied,
+                                                error);
+      for (const fs::recursive_directory_iterator end; !error && iterator != end; iterator.increment(error)) {
+        const fs::path relative = iterator->path().lexically_relative(old_account);
+        if (!IsCreationPath(relative)) continue;
+        creation_paths.push_back(relative);
+        std::error_code type_error;
+        if (iterator->is_directory(type_error)) iterator.disable_recursion_pending();
+      }
+      if (error) keep_old = true;
+      error.clear();
+      for (const fs::path& relative : creation_paths) {
+        const fs::path target = account / relative;
+        if (fs::exists(target, error)) continue;
+        fs::create_directories(target.parent_path(), error);
+        error.clear();
+        fs::rename(old_account / relative, target, error);
+        if (error) {
+          keep_old = true;
+          error.clear();
+        }
+      }
+    }
+    if (moved_old && !keep_old) fs::remove_all(old_account, error);
+    if (keep_old) {
+      return Result::Fail("The saved game was restored, but some installed creations could not be moved back; "
+                          "they are kept in userdata\\" + internal::PathToUtf8(old_account.filename()) + ".");
+    }
     if (ini_data && !internal::WriteBinaryFile(paths.settings_file, *ini_data)) {
       return Result::Fail("The saved game was restored, but launcher settings could not be restored.");
     }

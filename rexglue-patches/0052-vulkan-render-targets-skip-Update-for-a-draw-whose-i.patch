@@ -1,7 +1,7 @@
 From 9b15c7122dce913b0c7aa227238a9fd8df166d61 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 19:59:06 -0700
-Subject: [PATCH 52/86] vulkan render targets: skip Update for a draw whose
+Subject: [PATCH 52/89] vulkan render targets: skip Update for a draw whose
  inputs equal the previous draw's
 
 RenderTargetCache::Update + the Vulkan host-render-target part cost ~135 ns per draw (live stage timing), and

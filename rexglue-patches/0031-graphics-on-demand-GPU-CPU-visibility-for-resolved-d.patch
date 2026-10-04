@@ -1,7 +1,7 @@
 From 008ac8dd271c06deb35b44993dec1a9c757626e1 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 09:58:41 -0700
-Subject: [PATCH 31/86] graphics: on-demand GPU->CPU visibility for resolved
+Subject: [PATCH 31/89] graphics: on-demand GPU->CPU visibility for resolved
  data
 
 CommandProcessor::MakeGpuWritesVisibleToCpu(guest_address, length) copies back, synchronously

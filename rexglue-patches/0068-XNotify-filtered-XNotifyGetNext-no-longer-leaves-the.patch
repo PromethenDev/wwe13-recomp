@@ -1,7 +1,7 @@
 From 47f09e8f61d2583eef9a92dae6015d95917159ff Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 29 Sep 2026 17:50:27 -0700
-Subject: [PATCH 68/86] XNotify: filtered XNotifyGetNext no longer leaves the
+Subject: [PATCH 68/89] XNotify: filtered XNotifyGetNext no longer leaves the
  listener signalled for notifications it did not ask for
 
 WWE '13's XMP listener only dequeues 0x0A000003. A custom song start broadcasts 0x0A000001/2 to it; the

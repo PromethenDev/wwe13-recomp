@@ -56,6 +56,11 @@ fs::path PathFromUtf8(const std::string& text) {
 #endif
 }
 
+uint32_t ReadBigEndianU32(const uint8_t* bytes) {
+  return (static_cast<uint32_t>(bytes[0]) << 24) | (static_cast<uint32_t>(bytes[1]) << 16) |
+         (static_cast<uint32_t>(bytes[2]) << 8) | static_cast<uint32_t>(bytes[3]);
+}
+
 void WriteBigEndianU32(uint8_t* bytes, uint32_t value) {
   bytes[0] = static_cast<uint8_t>(value >> 24);
   bytes[1] = static_cast<uint8_t>(value >> 16);
@@ -703,6 +708,41 @@ std::optional<PackageInfo> InspectPackage(const fs::path& package_or_folder) {
       }
     }
     return source.info;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::optional<PackageInfo> InspectPackageHeader(const fs::path& package) {
+  try {
+    std::error_code error;
+    if (!fs::is_regular_file(package, error) || error) {
+      return std::nullopt;
+    }
+    std::ifstream file(package, std::ios::binary);
+    if (!file) {
+      return std::nullopt;
+    }
+    // The fields needed to tell a WWE '13 title update / DLC package apart: STFS magic ("CON "/"LIVE"/
+    // "PIRS"), content type at 0x344 and title ID at 0x360. No file table is parsed here; the full
+    // InspectPackage still validates a package when it is actually installed.
+    constexpr size_t kHeaderBytes = 0x364;  // covers the title ID at 0x360
+    std::array<uint8_t, kHeaderBytes> header{};
+    if (!file.read(reinterpret_cast<char*>(header.data()),
+                   static_cast<std::streamsize>(header.size()))) {
+      return std::nullopt;
+    }
+    if (std::memcmp(header.data(), "CON ", 4) != 0 && std::memcmp(header.data(), "LIVE", 4) != 0 &&
+        std::memcmp(header.data(), "PIRS", 4) != 0) {
+      return std::nullopt;
+    }
+    PackageInfo info;
+    info.kind = KindFromContentType(ReadBigEndianU32(header.data() + 0x344));
+    info.title_id = ReadBigEndianU32(header.data() + 0x360);
+    if (info.kind == PackageKind::kUnknown) {
+      return std::nullopt;
+    }
+    return info;
   } catch (...) {
     return std::nullopt;
   }

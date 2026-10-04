@@ -1,7 +1,7 @@
 From 41d5e1b38db3c8c93e9e4529b9798f1d2187bf3c Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Mon, 28 Sep 2026 11:57:54 -0700
-Subject: [PATCH 61/86] logging: InitLogging re-init adds the requested
+Subject: [PATCH 61/89] logging: InitLogging re-init adds the requested
  file/console sink (log_file was lost whenever a REX_* env override logged
  before InitLogging)
 

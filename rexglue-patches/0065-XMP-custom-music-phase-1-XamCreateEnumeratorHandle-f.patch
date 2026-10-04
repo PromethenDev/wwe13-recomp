@@ -1,7 +1,7 @@
 From 798a1321699b6a073e739c19a14cfa74d56c57f7 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 29 Sep 2026 00:09:13 -0700
-Subject: [PATCH 65/86] XMP custom music phase 1: XamCreateEnumeratorHandle for
+Subject: [PATCH 65/89] XMP custom music phase 1: XamCreateEnumeratorHandle for
  app 0xFA lists <exe>/music (xmp_music_dir) as 820-byte song records; 0x70025
  ok; 0x7003B logged play request; rate-limited XMP message log
 

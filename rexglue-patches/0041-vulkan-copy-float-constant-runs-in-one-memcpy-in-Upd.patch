@@ -1,7 +1,7 @@
 From abf13330cc42c3e33553330b93511580b0683200 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 22:55:25 -0700
-Subject: [PATCH 41/86] vulkan: copy float-constant runs in one memcpy in
+Subject: [PATCH 41/89] vulkan: copy float-constant runs in one memcpy in
  UpdateBindings
 
 Live in-ring profile (Linux, 4-man tag match): 37% of UpdateBindings samples

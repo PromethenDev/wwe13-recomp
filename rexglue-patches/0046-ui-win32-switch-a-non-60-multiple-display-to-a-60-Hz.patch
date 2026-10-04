@@ -1,11 +1,11 @@
 From 3736f2d48072154b2b111d3d4d678c3c95b2b591 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Sat, 26 Sep 2026 12:05:40 -0700
-Subject: [PATCH 46/86] ui(win32): switch a non-60-multiple display to a 60 Hz
+Subject: [PATCH 46/89] ui(win32): switch a non-60-multiple display to a 60 Hz
  multiple while fullscreen
 
 A 60 fps title on a 165 Hz panel cannot pace evenly (2.75 refreshes per
-frame); the owner's laptop felt "never locked 60" at 165 Hz and smoother
+frame); a test laptop felt "never locked 60" at 165 Hz and smoother
 after setting 60 Hz by hand. display_refresh_match (default true, Windows
 only): on fullscreen entry, if the monitor's refresh is not a multiple of
 60, pick the highest 60-multiple mode at the same size and depth and apply

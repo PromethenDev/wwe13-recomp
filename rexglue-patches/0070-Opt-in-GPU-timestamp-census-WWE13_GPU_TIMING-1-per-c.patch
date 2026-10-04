@@ -1,7 +1,7 @@
 From 6ffc07ce72a69de3a2a59110b0a06f5c2c751776 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Wed, 30 Sep 2026 07:44:35 -0700
-Subject: [PATCH 70/86] Opt-in GPU timestamp census (WWE13_GPU_TIMING=1):
+Subject: [PATCH 70/89] Opt-in GPU timestamp census (WWE13_GPU_TIMING=1):
  per-category GPU ms/frame (scene draws, resolve, RT transfer, EDRAM dump,
  texture load, shared-memory copy, present) read after fence completion; off =
  no queries

@@ -1,7 +1,7 @@
 From 3e94a81a2dc66086e19c30da812e20a8505fdb3d Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 19:32:59 -0700
-Subject: [PATCH 11/86] graphics: fix GPU-written memory capture in frame
+Subject: [PATCH 11/89] graphics: fix GPU-written memory capture in frame
  traces
 
 InitializeTraceCompleteDownloads never advanced download_buffer_offset, so

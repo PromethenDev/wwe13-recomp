@@ -1,7 +1,7 @@
 From f3ed54a17af3e98d592275a0d8ee913f54f9ead4 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 1 Oct 2026 20:29:40 -0700
-Subject: [PATCH 82/86] Audio: retry opening the output, then fall back to
+Subject: [PATCH 82/89] Audio: retry opening the output, then fall back to
  silent real-time output instead of hanging
 
 WWE13 2026-10-01: SDL_InitSubSystem(AUDIO) failed ('Could not setup connection to PulseAudio', a streaming host

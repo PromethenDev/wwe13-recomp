@@ -1,7 +1,7 @@
 From d32ffc34e157298db3171264a98e7d982cb4b4ac Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 13:42:58 -0700
-Subject: [PATCH 34/86] vulkan: prefer a discrete GPU on auto-select and log
+Subject: [PATCH 34/89] vulkan: prefer a discrete GPU on auto-select and log
  the chosen device
 
 With vulkan_device=-1, discrete GPUs now sort ahead of integrated ones

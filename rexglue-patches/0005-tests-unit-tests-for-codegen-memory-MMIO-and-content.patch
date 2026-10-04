@@ -1,7 +1,7 @@
 From 85c972faa72b95962496e246cfc4f32409eb2ef2 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 12:48:59 -0700
-Subject: [PATCH 05/86] tests: unit tests for codegen, memory, MMIO and content
+Subject: [PATCH 05/89] tests: unit tests for codegen, memory, MMIO and content
  probe
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>

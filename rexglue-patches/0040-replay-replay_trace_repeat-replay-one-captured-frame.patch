@@ -1,7 +1,7 @@
 From da17fb6db3987ac73b4a47492cc6befea34feb8f Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 19:09:28 -0700
-Subject: [PATCH 40/86] replay: replay_trace_repeat - replay one captured frame
+Subject: [PATCH 40/89] replay: replay_trace_repeat - replay one captured frame
  N times and time it
 
 TracePlayer::ReplayCurrentFrame replays the whole current frame without

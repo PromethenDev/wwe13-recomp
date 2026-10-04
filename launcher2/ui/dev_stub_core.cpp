@@ -112,6 +112,56 @@ Result ImportPackage(const fs::path&, const Paths&, const fs::path&, const Progr
   return cancel.load() ? Result::Fail("The operation was canceled.") : Result::Ok();
 }
 
+std::optional<CreationInfo> InspectCreationPackage(const fs::path& package) {
+  if (package.empty()) return std::nullopt;
+  const std::string extension = UpperExtension(package);
+  CreationKind kind;
+  if (extension == "CAS") kind = CreationKind::kSuperstar;
+  else if (extension == "ENC") kind = CreationKind::kEntrance;
+  else if (extension == "CAR") kind = CreationKind::kArena;
+  else if (extension == "PT") kind = CreationKind::kLogos;
+  else if (extension == "DAT") kind = CreationKind::kSave;
+  else return std::nullopt;
+  const std::string name = package.filename().string();
+  return CreationInfo{kind, package.stem().string(), name,
+                      kind == CreationKind::kSave ? "—" : name.substr(0, 2),
+                      0x545108B4, false};
+}
+
+std::vector<fs::path> FindCreationPackages(const fs::path& folder) {
+  std::vector<fs::path> packages;
+  std::error_code error;
+  if (!fs::is_directory(folder, error) || error) return packages;
+  for (fs::directory_iterator iterator(folder, error), end; !error && iterator != end; iterator.increment(error)) {
+    if (iterator->is_regular_file(error) && !error && InspectCreationPackage(iterator->path())) {
+      packages.push_back(iterator->path());
+    }
+    error.clear();
+  }
+  std::sort(packages.begin(), packages.end());
+  return packages;
+}
+
+std::vector<CreationInfo> ListInstalledCreations(const Paths&) { return {}; }
+
+Result ImportCreations(const Paths& paths, const std::vector<fs::path>&, bool,
+                       const ProgressFn& progress, const CancelFlag& cancel, std::string) {
+  ReportProgress(progress, "Installing sample creations");
+  if (cancel.load()) return Result::Fail("The import was canceled.");
+  return BackupSaves(paths, true, nullptr);
+}
+
+Result RemoveCreation(const Paths& paths, std::string_view) {
+  return BackupSaves(paths, true, nullptr);
+}
+
+Result ImportFullSave(const Paths& paths, const fs::path&, const ProgressFn& progress,
+                      const CancelFlag& cancel) {
+  ReportProgress(progress, "Replacing the sample full save");
+  if (cancel.load()) return Result::Fail("The import was canceled.");
+  return BackupSaves(paths, true, nullptr);
+}
+
 std::vector<BackupInfo> ListBackups(const Paths&) { return g_backups; }
 
 Result BackupSaves(const Paths&, bool automatic, BackupInfo* created) {

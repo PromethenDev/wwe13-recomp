@@ -1,7 +1,7 @@
 From ff203efa62ded6e4c03b296e4c27501682638365 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Wed, 30 Sep 2026 22:57:48 -0700
-Subject: [PATCH 77/86] Opt-in 4096-tile EDRAM model (edram_tiles) +
+Subject: [PATCH 77/89] Opt-in 4096-tile EDRAM model (edram_tiles) +
  wwe13_dof_composite_nop cvar for the 1080p scene path
 
 The 1920x1080 internal scene exceeds the 2048-tile Xenos EDRAM; edram_tiles=4096 (default 2048)

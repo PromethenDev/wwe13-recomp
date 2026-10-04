@@ -9,12 +9,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 get_filename_component(WWE13_PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
-get_filename_component(WWE13_REXGLUE_ROOT "${WWE13_PROJECT_ROOT}/../tools/rexglue" ABSOLUTE)
-if(NOT EXISTS "${WWE13_REXGLUE_ROOT}/thirdparty/volk/volk.c")
-  # Nested worktrees sit below .worktrees/<name>; use the shared sibling tools directory.
-  get_filename_component(WWE13_REXGLUE_ROOT "${WWE13_PROJECT_ROOT}/../../../tools/rexglue" ABSOLUTE)
+if(NOT WWE13_REXGLUE_THIRDPARTY)
+  get_filename_component(WWE13_REXGLUE_ROOT "${WWE13_PROJECT_ROOT}/../tools/rexglue" ABSOLUTE)
+  if(NOT EXISTS "${WWE13_REXGLUE_ROOT}/thirdparty/volk/volk.c")
+    # Nested worktrees sit below .worktrees/<name>; use the shared sibling tools directory.
+    get_filename_component(WWE13_REXGLUE_ROOT "${WWE13_PROJECT_ROOT}/../../../tools/rexglue" ABSOLUTE)
+  endif()
+  set(WWE13_REXGLUE_THIRDPARTY "${WWE13_REXGLUE_ROOT}/thirdparty")
 endif()
-set(WWE13_REXGLUE_THIRDPARTY "${WWE13_REXGLUE_ROOT}/thirdparty")
 
 set(WWE13_MINIZ_VENDOR "${WWE13_PROJECT_ROOT}/launcher2/thirdparty/miniz/miniz.h")
 if(NOT EXISTS "${WWE13_MINIZ_VENDOR}")

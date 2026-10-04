@@ -2,6 +2,8 @@
 
 An unofficial static recompilation of the **Xbox 360 version of WWE '13** for 64-bit Windows and Linux. The original PowerPC game code is translated ahead of time to C++ and built into a native executable using the ReXGlue SDK; this is not an Xbox 360 emulator.
 
+**Latest release: v1.1** (2026-10-04) – new Content page in the launcher, Ministry Undertaker freeze fix and more. See [CHANGELOG.md](CHANGELOG.md).
+
 ## Before you download
 
 You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game files yourself. This project does **not** include the retail `default.xex`, title-update file, game assets, audio, video, DLC, or saves. The executable is a compiled recompilation derived from the game; it is not a substitute for supplying the required game data. See [DISCLAIMER.md](DISCLAIMER.md).
@@ -21,7 +23,7 @@ You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game fil
 
 ## Install and play
 
-1. Download `WWE13-Recomp-v1.0.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
+1. Download `WWE13-Recomp-v1.1.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
 2. Start **`WWE13 Launcher.exe`** (Linux: `Linux-x86_64/wwe13-launcher`).
 3. In **Game files**, do one of the following:
    - put your game folder in the `WWE 13` folder beside the launcher, or
@@ -32,16 +34,11 @@ You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game fil
 
 The launcher checks every file and shows **Game files ready** when everything is correct.
 
-Backup ways to start: `wwe13-enhanced.exe` (the previous launcher) or `wwe13.bat` (starts the game directly).
-
 ```text
 WWE13-Recomp-x64/
 ├── WWE13 Launcher.exe          # start here (Windows)
 ├── wwe13.exe                   # the game (started by the launcher)
 ├── wwe13.toml                  # keyboard keys (change them on the launcher's Controls page)
-├── wwe13-enhanced.exe          # previous launcher (backup)
-├── wwe13.bat                   # backup: start the game directly (Classic settings)
-├── wwe13-debug.bat             # extra diagnostic logs, only if asked for them in a bug report
 ├── avcodec-58.dll, avutil-56.dll
 ├── shader-cache/               # pre-built graphics data so the game starts quickly
 ├── Linux-x86_64/               # Linux launcher + game
@@ -60,8 +57,7 @@ WWE13-Recomp-x64/
 - **Frame rate** – *Classic* (60 in matches, 30 in entrances and cutscenes, like the console), *60 Everywhere* (needs a strong PC), or *30 Locked* (steady, best for laptops and handhelds).
 - **Display** – fullscreen or windowed (press **F11** in the game to switch at any time); **Graphics card** – for PCs with two GPUs.
 - **Start straight away next time** – skip the launcher on later starts. Hold **Shift** while it starts to come back to the settings.
-- **Music** – drop your own songs in to use them in the game's custom music.
-- **Saves** – **Back Up Now** and **Restore** your saves with one click.
+- **Content** – everything you add to the game in one place: custom Superstars, Entrances, Arenas, Logos, your own entrance **Music**, and **Save Data** (Back Up Now, Restore, and imported packs).
 
 ## Controls
 
@@ -69,7 +65,15 @@ An Xbox-compatible controller is recommended. The keyboard also works as a contr
 
 ## Saves and DLC
 
-The game keeps saves, DLC and settings in `userdata/` beside the launcher. It is local to this installation; use **Back Up Now** on the launcher's **Saves** page (or copy the folder) before moving or replacing a release.
+The game keeps saves, DLC and settings in `userdata/` beside the launcher. It is local to this installation; use **Back Up Now** under **Content → Save Data** in the launcher (or copy the folder) before moving or replacing a release.
+
+## Adding creations
+
+Open **Content** in the launcher and pick a category (Superstars, Entrances, Arenas or Logos). **Add…** selects Xbox 360 creation packages (Superstar `.cas`, Entrance `.enc`, Arena `.car`, Paint Tool logo `.pt`); **Add a folder…** imports a whole folder of them. Each list shows the in-game name and slot and can be sorted by name, slot or date. The launcher backs up your saves before changing anything. You can also drag package files onto the page.
+
+Some creation packs include a matching `SaveData.dat` file that lists their custom slots. Use **Content → Save Data → Replace current save…** to import it; this replaces your current WWE '13 progress, so the launcher asks you to confirm and makes a backup first. Items imported together this way form a **pack**: remove them with **Remove pack** under **Save Data**, which also puts your save back the way it was before the import. Removing one item of a pack on its own would make the game report missing content, so the launcher does not allow it.
+
+Some older entrance packages use title ID `54510890` rather than WWE '13's `545108B4`. The launcher stores these entrances under WWE '13's save title ID and tells you so; it does not modify the source package. Back up your saves before trying packages from an unfamiliar pack.
 
 ## Known issues
 

@@ -529,7 +529,12 @@ bool StfsReader::CopyFile(const StfsEntry& entry, std::ostream& output,
       }
     }
   }
-  if (copied / kBlockSize + (copied % kBlockSize != 0) != entry.block_count) {
+  const uint64_t blocks_for_file = copied / kBlockSize + (copied % kBlockSize != 0);
+  // WWE '13 entrance packages in the supplied save pack set the file-table allocation count one
+  // block higher than both the payload length and the terminal hash chain. The data chain is
+  // still bounded and the payload size is read exactly, so accept this single trailing allocation
+  // unit while rejecting larger count/chain disagreements.
+  if (entry.block_count != blocks_for_file && entry.block_count != blocks_for_file + 1) {
     if (error) {
       *error = "A file in this package is incomplete.";
     }

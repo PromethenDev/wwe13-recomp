@@ -102,7 +102,16 @@ struct FoundGame {
   fs::path folder;
   GameFilesStatus status;
 };
-std::vector<FoundGame> FindGameFiles(const Paths& paths, const ProgressFn& progress, const CancelFlag& cancel);
+// found_packages (optional): WWE '13 title-update / DLC packages seen during the same walk (package files
+// and Xenia content folders), so the launcher can offer to install them. Search order puts the places
+// players keep these files (launcher folder and its parent, Downloads/Desktop/Documents, the game
+// folder's parent, drive roots one level) ahead of the deeper walk; only files matching a known TU/DLC
+// name, a known package size, or an Xbox content path are opened at all.
+std::vector<FoundGame> FindGameFiles(const Paths& paths, const ProgressFn& progress, const CancelFlag& cancel,
+                                     std::vector<fs::path>* found_packages = nullptr);
+// Test-only: how many candidate package files FindGameFiles opened (header read) during its most recent
+// call. Reset at the start of every call so a test can prove unrelated files are never touched.
+uint64_t FindGameFilesHeaderReadCount();
 
 // ---------------------------------------------------------------------------------------------- disc image (F2)
 // Player's own Xbox 360 disc image (XDVDFS / XISO, including Redump images with a video partition offset).
@@ -121,16 +130,92 @@ struct PackageInfo {
   uint32_t title_id = 0;
 };
 std::optional<PackageInfo> InspectPackage(const fs::path& package_or_folder);
+// Header-only variant: checks the STFS magic, content type (0x344) and title ID (0x360) without parsing
+// the file list. "Find Automatically" uses this to verify a candidate cheaply; InspectPackage still runs
+// the full check at install time.
+std::optional<PackageInfo> InspectPackageHeader(const fs::path& package);
 // Installable files a player dropped into a game folder (top level only): disc images (.iso/.img) and WWE '13
 // title-update / DLC package files. Never throws; unreadable entries are skipped.
 struct FolderInstallables {
   std::vector<fs::path> disc_images;
   std::vector<fs::path> packages;
   bool has_title_update = false;
+  bool from_search = false;  // packages found by "Find Automatically" anywhere on the PC
 };
 FolderInstallables FindInstallableFiles(const fs::path& folder);
 Result ImportPackage(const fs::path& package_or_folder, const Paths& paths, const fs::path& game_folder,
                      const ProgressFn& progress, const CancelFlag& cancel);
+
+// ---------------------------------------------------------------------------------------------- custom creations / saves
+// WWE '13 creator packages are saved-game-content STFS containers with one SaveData.Dat payload. They live beside
+// the user's main save under B13EBABEBABEBABE/545108B4/00000001 and have a matching Headers sidecar.
+enum class CreationKind { kSuperstar, kEntrance, kArena, kLogos, kSave };
+struct CreationInfo {
+  CreationKind kind = CreationKind::kSuperstar;
+  std::string display_name;  // in-game name from the STFS display-name field
+  std::string package_name;  // package filename, also the installed content-folder name
+  std::string slot;          // two-digit filename slot, or "—" for a full save
+  std::string when;          // ISO 8601 install time (content folder mtime); empty when unknown
+  uint32_t title_id = 0;     // source STFS title ID; 54510890 entrances normalize on import
+  bool title_id_normalized = false;
+};
+std::optional<CreationInfo> InspectCreationPackage(const fs::path& package);
+// Finds supported creation/save STFS files directly inside a chosen pack folder.
+std::vector<fs::path> FindCreationPackages(const fs::path& folder);
+std::vector<CreationInfo> ListInstalledCreations(const Paths& paths);
+// Backs up the current userdata account once before any change. Replacements are permitted only when explicitly
+// confirmed by the caller; content from a 54510890 entrance package is installed in the 545108B4 runtime folder.
+// pack_name names the import batch (the chosen folder's or file's name); it is recorded in the pack manifest
+// and shown in the Content Packs list. Empty keeps the old behaviour (the UI derives a name from the first item).
+Result ImportCreations(const Paths& paths, const std::vector<fs::path>& packages, bool replace_existing,
+                       const ProgressFn& progress, const CancelFlag& cancel,
+                       std::string pack_name = {});
+Result RemoveCreation(const Paths& paths, std::string_view package_name);
+// Replaces only the main SaveData.Dat package contents and its metadata; the caller is responsible for the clear
+// replacement confirmation. An automatic save-folder backup is always made first.
+Result ImportFullSave(const Paths& paths, const fs::path& package, const ProgressFn& progress,
+                      const CancelFlag& cancel);
+
+// ---------------------------------------------------------------------------------------------- content packs (safe removal)
+// A pack records what was imported together and the automatic backup taken before that import, so the whole pack can
+// be removed later by restoring that backup. A full save indexes the creation slots, so once a full save is imported
+// the pack becomes "save-indexed" and its items must be removed as a pack rather than one at a time.
+struct ContentPack {
+  std::string id;                    // stable id (import timestamp)
+  std::string name;                  // chosen folder/file name at import time; empty on old manifests
+  std::vector<std::string> packages; // installed package names in this pack (creations only, no full save)
+  bool save_indexed = false;         // a full save was imported after these packages were installed
+  std::string backup;                // backups/ basename taken before this pack's import (empty when none)
+  std::string when;                  // ISO 8601 import time
+};
+std::vector<ContentPack> ListContentPacks(const Paths& paths);
+// Removes the whole pack: restores the automatic backup taken before the pack import (which also removes its items),
+// then drops the pack from the manifest. Fails clearly when the backup is no longer available.
+Result RemoveContentPack(const Paths& paths, const std::string& pack_id);
+// A single creation may be removed on its own only when it is not referenced by a save-indexed pack.
+bool IsCreationRemovalSafe(const Paths& paths, std::string_view package_name);
+
+// ---------------------------------------------------------------------------------------------- entrance videos
+// The game's replaceable titantron movies live in the game folder under movies/titantron (numeric stems, .bik2).
+// A player assigns a video to a titantron; the launcher copies it to
+// userdata/custom/entrance-videos/<titantron stem>.<original extension>.
+struct TitantronMovie {
+  std::string stem;    // "050" (the titantron file stem; also the assignment key)
+  fs::path path;       // movies/titantron/050.bik2 (empty when the game folder is not set)
+};
+struct EntranceVideo {
+  std::string stem;    // titantron stem this video replaces
+  fs::path path;       // userdata/custom/entrance-videos/<stem>.<ext>
+  std::string source;  // original file name the player assigned (basename)
+};
+// Common video extensions a player can assign to a titantron.
+const std::vector<std::string>& SupportedVideoExtensions();
+bool IsSupportedVideoFile(const fs::path& file);
+std::vector<TitantronMovie> ListTitantronMovies(const fs::path& game_folder);
+std::vector<EntranceVideo> ListEntranceVideos(const Paths& paths);
+// Copies the video into the entrance-videos folder keyed by the titantron stem (replacing any existing assignment).
+Result AssignEntranceVideo(const Paths& paths, std::string_view titantron_stem, const fs::path& video_file);
+Result RemoveEntranceVideo(const Paths& paths, std::string_view titantron_stem);
 
 // ---------------------------------------------------------------------------------------------- saves (F5)
 struct BackupInfo {
@@ -140,7 +225,9 @@ struct BackupInfo {
   bool automatic = false;
 };
 std::vector<BackupInfo> ListBackups(const Paths& paths);
-Result BackupSaves(const Paths& paths, bool automatic, BackupInfo* created);  // automatic: keep the newest 5
+// automatic: keep the newest 5. include_creations=false (the pre-launch backup) skips imported creation
+// packages and marks the zip "saves only"; restoring such a zip keeps the installed creations.
+Result BackupSaves(const Paths& paths, bool automatic, BackupInfo* created, bool include_creations = true);
 Result RestoreBackup(const Paths& paths, const fs::path& backup_zip);        // backs up the current saves first
 Result ImportBackup(const Paths& paths, const fs::path& external_zip);       // copies into backups/ after checking it
 
@@ -168,7 +255,13 @@ struct LaunchPlan {
   fs::path working_directory;
 };
 LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings& settings, const std::vector<GpuInfo>& gpus);
-Result StartGame(const LaunchPlan& plan);  // detached; returns once the process started
+// Detached start. With watch_seconds > 0 it also waits that long and fails with kGameClosedEarlyMessage
+// when the game process has already exited (e.g. an antivirus block, a missing file or a driver without
+// Vulkan), so the launcher can stay open and tell the player instead of silently disappearing.
+inline constexpr const char* kGameClosedEarlyMessage =
+    "WWE '13 closed right after starting. Press \"Save a Bug Report (logs + settings)\" at the bottom "
+    "of the launcher and attach the zip to your report on GitHub.";
+Result StartGame(const LaunchPlan& plan, double watch_seconds = 0.0);
 
 // ---------------------------------------------------------------------------------------------- keyboard controls
 // The game's keyboard keys: keybind_* in wwe13.toml beside the game executable (read by the game at start).

@@ -1,7 +1,7 @@
 From 5df1281a1e8ceb01086ba9b7e6410c24afd890ec Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 1 Oct 2026 21:44:17 -0700
-Subject: [PATCH 83/86] XAM saves: never crash when the save folder cannot be
+Subject: [PATCH 83/89] XAM saves: never crash when the save folder cannot be
  written
 
 Unchecked OpenFile results (fseek/fwrite on a null FILE*) and the throwing std::filesystem::create_directories

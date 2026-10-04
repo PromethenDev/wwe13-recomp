@@ -1,7 +1,7 @@
 From 760fbfbe702b6e05130032981b5549a451448a14 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Tue, 22 Sep 2026 17:41:34 -0700
-Subject: [PATCH 09/86] vulkan: add debug_periodic_cache_clear diagnostic
+Subject: [PATCH 09/89] vulkan: add debug_periodic_cache_clear diagnostic
 
 Every debug_periodic_cache_clear_frames (default 30) closed frames, after
 all queue work completes, clear one cache: texture (with the transient

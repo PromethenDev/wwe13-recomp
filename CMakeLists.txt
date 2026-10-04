@@ -68,6 +68,7 @@ add_executable(wwe13
   src/bink_oracle.cpp
   src/resolve_coherency.cpp
   src/present_interval.cpp
+  src/cloth_handshake.cpp
   src/res_probe.cpp
   src/scene_resolution.cpp
   src/text_entry_keyboard.cpp

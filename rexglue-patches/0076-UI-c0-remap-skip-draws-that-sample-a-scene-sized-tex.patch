@@ -1,7 +1,7 @@
 From 0b1637673367aad9490ddc957e3d169c67ef3316 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Wed, 30 Sep 2026 22:37:14 -0700
-Subject: [PATCH 76/86] UI c0 remap: skip draws that sample a scene-sized
+Subject: [PATCH 76/89] UI c0 remap: skip draws that sample a scene-sized
  texture (WWE13 BUG-7: dark 320x320 box at 480p)
 
 VS 8586E774714B131B draws both UI sprites (1280x720 units) and full-screen copies/fades of the reduced scene

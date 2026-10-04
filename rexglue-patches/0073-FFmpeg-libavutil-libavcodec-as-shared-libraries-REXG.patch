@@ -1,7 +1,7 @@
 From 0ae9ea5fdc5dd794647d80803ae8ed0f87d137c2 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Wed, 30 Sep 2026 19:04:40 -0700
-Subject: [PATCH 73/86] FFmpeg libavutil/libavcodec as shared libraries
+Subject: [PATCH 73/89] FFmpeg libavutil/libavcodec as shared libraries
  (REXGLUE_FFMPEG_SHARED, default ON) for LGPL compliance
 
 Windows: avutil-56.dll / avcodec-58.dll (export-all + ff_reverse DATA .def); Linux: libavutil.so.56 /

@@ -1,7 +1,7 @@
 From 986a15a04ff0bcb4472edba6149c818fe70cb5aa Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 09:58:41 -0700
-Subject: [PATCH 32/86] diagnostics: resolve log, readback range filter and
+Subject: [PATCH 32/89] diagnostics: resolve log, readback range filter and
  guest read watch
 
 Env-gated, off by default:

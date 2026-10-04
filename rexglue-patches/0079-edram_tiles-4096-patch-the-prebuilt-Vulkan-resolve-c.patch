@@ -1,7 +1,7 @@
 From eabbe5832760e39842b3ba9b422e4fb2178e4fe2 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Thu, 1 Oct 2026 07:24:17 -0700
-Subject: [PATCH 79/86] edram_tiles=4096: patch the prebuilt Vulkan
+Subject: [PATCH 79/89] edram_tiles=4096: patch the prebuilt Vulkan
  resolve/clear modules' EDRAM modulus (2048 -> 4096 tiles); D3D12 refuses 4096
 
 The prebuilt resolve/clear compute shaders wrap EDRAM addresses at 2048 tiles (OpUMod 2621440 unscaled /

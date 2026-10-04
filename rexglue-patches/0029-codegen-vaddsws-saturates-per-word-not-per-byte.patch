@@ -1,7 +1,7 @@
 From 5905278d0ae5c5ff77e70314d8882b3ad0e5bf28 Mon Sep 17 00:00:00 2001
 From: PromethenDev <PromethenDev@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 08:41:54 -0700
-Subject: [PATCH 29/86] codegen: vaddsws saturates per word, not per byte
+Subject: [PATCH 29/89] codegen: vaddsws saturates per word, not per byte
 
 The overflow mask (a ^ sum) & (b ^ sum) only carries the overflow flag in bit 31 of each
 word, but blendv_epi8 selects on bit 7 of every byte, so any byte whose own bit 7 was set
