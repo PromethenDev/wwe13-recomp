@@ -1,0 +1,58 @@
+From e4e5ef7f647f269636594d5bf47542d6bd3fbac9 Mon Sep 17 00:00:00 2001
+From: akshat-kul <akshatkulshreshtha49@gmail.com>
+Date: Tue, 6 Oct 2026 04:53:45 +0530
+Subject: [PATCH] input(sdl): put a new controller in the first free slot, not
+ its XInput slot
+
+Only user 0 is signed in (XamUserGetSigninState), and WWE '13 binds the profile and storage
+device to the pad that pressed Start. A pad that Windows left in XInput slot 1+ (another pad
+or a virtual one connected first, even after that device is unplugged) became guest user 1+:
+"not signed in", "no storage device", and no saves (GitHub #14). Hiding the other device with
+SDL_GAMECONTROLLER_IGNORE_DEVICES did not help either, because the pad kept its XInput slot.
+Now each new controller takes the lowest free slot, so a single pad is always user 0.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/input/sdl/sdl_input_driver.cpp | 23 ++++++++---------------
+ 1 file changed, 8 insertions(+), 15 deletions(-)
+
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index bdef585..c811a83 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -450,24 +450,17 @@ void SDLInputDriver::OnControllerDeviceAddedLocked(const SDL_Event& event) {
+       static_cast<int>(SDL_GetJoystickType(SDL_GetGamepadJoystick(controller))),
+       static_cast<int>(SDL_GetGamepadType(controller)), SDL_GetGamepadVendor(controller),
+       SDL_GetGamepadProduct(controller));
++  // Always take the first free slot, not the controller's own player index (on Windows its XInput
++  // slot): only user 0 is signed in, so a pad that Windows put in XInput slot 1+ (another pad or a
++  // virtual one connected first) would otherwise play signed out, with no storage device and no saves.
+   int user_id = -1;
+-  // Check if the controller has a player index LED.
+-  user_id = SDL_GetGamepadPlayerIndex(controller);
+-  // Is that id already taken?
+-  if (user_id < 0 || user_id >= static_cast<int>(controllers_.size()) ||
+-      controllers_.at(user_id).sdl) {
+-    user_id = -1;
+-  }
+-  // No player index or already taken, just take the first free slot.
+-  if (user_id < 0) {
+-    for (size_t i = 0; i < controllers_.size(); i++) {
+-      if (!controllers_.at(i).sdl) {
+-        user_id = static_cast<int>(i);
++  for (size_t i = 0; i < controllers_.size(); i++) {
++    if (!controllers_.at(i).sdl) {
++      user_id = static_cast<int>(i);
+ #if SDL_VERSION_ATLEAST(2, 0, 12)
+-        SDL_SetGamepadPlayerIndex(controller, user_id);
++      SDL_SetGamepadPlayerIndex(controller, user_id);
+ #endif
+-        break;
+-      }
++      break;
+     }
+   }
+   if (user_id >= 0) {
+-- 
+2.52.0.windows.1
+
