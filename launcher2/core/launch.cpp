@@ -205,6 +205,7 @@ LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings& settings,
   if (resolution.output) plan.arguments.emplace_back(std::string("--resolution=") + resolution.output);
   if (resolution.scale > 1) plan.arguments.emplace_back("--resolution_scale=" + std::to_string(resolution.scale));
   if (!settings.gpu_id.empty()) plan.arguments.emplace_back("--vulkan_device_id=" + settings.gpu_id);
+  if (effective.stretch_to_fill) plan.arguments.emplace_back("--present_letterbox=false");
 
   plan.environment = {
       {"REX_DEBUG_UI", "false"},
@@ -216,6 +217,7 @@ LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings& settings,
       {"WWE13_THREAD_PROFILE_OUT", ""},
       {"WWE13_LOCK_OWNER_SAMPLE", ""},
       {"WWE13_F24_PIXEL_RATE", "1"},
+      {"WWE13_HOST_VSYNC", effective.sync_to_display ? "1" : "0"},
       {"WWE13_INTERNAL_RES", resolution.internal ? resolution.internal : ""},
       {"WWE13_SCENE_AA", effective.anti_aliasing == AntiAliasing::kFaster2x ? "2x" : ""}};
 #ifndef _WIN32

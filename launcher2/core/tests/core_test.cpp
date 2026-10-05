@@ -127,7 +127,14 @@ void TestSettings(const fs::path& root) {
   resolution_settings.explicit_choice = true;
   assert(SaveSettings(resolution_paths, resolution_settings).ok);
   assert(LoadSettings(resolution_paths).resolution == Resolution::k1080p);
-  std::cout << "PASS settings UTF-16LE schema-7 round-trip, unknown keys, schema-2 migration, and 1080p persistence\n";
+  const Settings defaults = LoadSettings(resolution_paths);
+  assert(!defaults.stretch_to_fill && defaults.sync_to_display);
+  resolution_settings.stretch_to_fill = true;
+  resolution_settings.sync_to_display = false;
+  assert(SaveSettings(resolution_paths, resolution_settings).ok);
+  const Settings screen = LoadSettings(resolution_paths);
+  assert(screen.stretch_to_fill && !screen.sync_to_display);
+  std::cout << "PASS settings UTF-16LE schema-7 round-trip, unknown keys, schema-2 migration, 1080p and screen options persistence\n";
 }
 
 const std::string* EnvironmentValue(const LaunchPlan& plan, const std::string& name) {
@@ -188,9 +195,18 @@ void TestLaunchPlan(const fs::path& root) {
         assert(scene_aa && *scene_aa == (aa == AntiAliasing::kFaster2x ? "2x" : ""));
         assert((EnvironmentValue(plan, "WWE13_KEEP_60") != nullptr) == (frame_rate == FrameRate::kKeep60));
         assert((EnvironmentValue(plan, "WWE13_LOCK_30") != nullptr) == (frame_rate == FrameRate::kLock30));
+        assert(EnvironmentValue(plan, "WWE13_HOST_VSYNC") && *EnvironmentValue(plan, "WWE13_HOST_VSYNC") == "1");
       }
     }
   }
+  Settings screen_options;
+  screen_options.gpu_id = "10DE:2684";
+  screen_options.stretch_to_fill = true;
+  screen_options.sync_to_display = false;
+  const LaunchPlan screen_plan = BuildLaunchPlan(paths, screen_options, gpus);
+  assert(screen_plan.arguments.back() == "--present_letterbox=false");
+  assert(EnvironmentValue(screen_plan, "WWE13_HOST_VSYNC") &&
+         *EnvironmentValue(screen_plan, "WWE13_HOST_VSYNC") == "0");
   Settings automatic;
   automatic.gpu_id = "1002:164E";
   const LaunchPlan integrated = BuildLaunchPlan(paths, automatic, gpus);

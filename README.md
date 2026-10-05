@@ -56,6 +56,7 @@ WWE13-Recomp-x64/
 - **Resolution** – the sharpness the game renders at. 480p is the fastest (handhelds and integrated graphics); 720p is the original Xbox 360 sharpness; 1440p needs a strong graphics card.
 - **Frame rate** – *Classic* (60 in matches, 30 in entrances and cutscenes, like the console), *60 Everywhere* (needs a strong PC), or *30 Locked* (steady, best for laptops and handhelds).
 - **Display** – fullscreen or windowed (press **F11** in the game to switch at any time); **Graphics card** – for PCs with two GPUs.
+- **Stretch to fill wide screens** – fill a 21:9 or 16:10 screen instead of showing black bars (the 16:9 picture is stretched). **Sync frames to the monitor** – on by default; turn it off if fullscreen stutters on a high refresh rate or FreeSync / G-SYNC monitor (Windows).
 - **Start straight away next time** – skip the launcher on later starts. Hold **Shift** while it starts to come back to the settings.
 - **Content** – everything you add to the game in one place: custom Superstars, Entrances, Arenas, Logos, your own entrance **Music**, and **Save Data** (Back Up Now, Restore, and imported packs).
 

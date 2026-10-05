@@ -276,6 +276,8 @@ Settings ActiveSettings(const AppState& app) {
   settings.game_folder = app.settings.game_folder;
   settings.auto_start = app.settings.auto_start;
   settings.auto_backup = app.settings.auto_backup;
+  settings.stretch_to_fill = app.settings.stretch_to_fill;
+  settings.sync_to_display = app.settings.sync_to_display;
   settings.explicit_choice = false;
   return settings;
 }
@@ -1563,11 +1565,15 @@ void DrawSettings(AppState& app) {
     const fs::path game_folder = app.settings.game_folder;
     const bool auto_start = app.settings.auto_start;
     const bool auto_backup = app.settings.auto_backup;
+    const bool stretch_to_fill = app.settings.stretch_to_fill;
+    const bool sync_to_display = app.settings.sync_to_display;
     app.settings = app.recommendation.settings;
     app.settings.gpu_id = selected_gpu_id;
     app.settings.game_folder = game_folder;
     app.settings.auto_start = auto_start;
     app.settings.auto_backup = auto_backup;
+    app.settings.stretch_to_fill = stretch_to_fill;
+    app.settings.sync_to_display = sync_to_display;
     app.settings.explicit_choice = false;
     SaveSettings(app);
   }
@@ -1703,6 +1709,22 @@ void DrawSettings(AppState& app) {
       }
     }
     ImGui::EndCombo();
+  }
+  ImGui::EndChild();
+
+  // Screen options are personal preferences (like auto backup), so they never switch off Recommended.
+  ImGui::Spacing();
+  ImGui::BeginChild("settings-screen-row", ImVec2(0, S(app, compact ? 44.0f : 52.0f)), false,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::SetCursorPos(S(app, 14, compact ? 10.0f : 14.0f));
+  if (ImGui::Checkbox("Stretch to fill wide screens", &app.settings.stretch_to_fill)) SaveSettings(app);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("Fill a 21:9 or 16:10 screen instead of showing black bars. The picture is stretched.");
+  }
+  ImGui::SameLine(0.0f, S(app, 28.0f));
+  if (ImGui::Checkbox("Sync frames to the monitor", &app.settings.sync_to_display)) SaveSettings(app);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("Windows. Turn off if fullscreen stutters on a high refresh rate or FreeSync / G-SYNC monitor.");
   }
   ImGui::EndChild();
   ImGui::PopStyleVar();
