@@ -204,7 +204,24 @@ LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings& settings,
   const ResolutionParameters resolution = GetResolutionParameters(effective.resolution);
   if (resolution.output) plan.arguments.emplace_back(std::string("--resolution=") + resolution.output);
   if (resolution.scale > 1) plan.arguments.emplace_back("--resolution_scale=" + std::to_string(resolution.scale));
-  if (!settings.gpu_id.empty()) plan.arguments.emplace_back("--vulkan_device_id=" + settings.gpu_id);
+  if (!settings.gpu_id.empty()) {
+    // "vendor:device" selects a device by identity. When a PC has two identical GPUs the launcher
+    // disambiguates them as "vendor:device:index" (gpus.cpp), but the game's vulkan_device_id parser
+    // accepts exactly one colon and rejects the extra one, silently falling back to automatic device
+    // selection. Pass the enumerated index the launcher recorded for those instead.
+    const auto selected_gpu = std::find_if(gpus.begin(), gpus.end(), [&](const GpuInfo& gpu) {
+      return gpu.id == settings.gpu_id;
+    });
+    const bool disambiguated = selected_gpu != gpus.end() && selected_gpu->vulkan_index >= 0 &&
+        settings.gpu_id.find(':', settings.gpu_id.find(':') + 1) != std::string::npos;
+    if (disambiguated) {
+      plan.arguments.emplace_back("--vulkan_device=" + std::to_string(selected_gpu->vulkan_index));
+    } else {
+      plan.arguments.emplace_back("--vulkan_device_id=" + settings.gpu_id);
+    }
+  }
+  // Fill a 21:9 or 16:10 screen (stretched 16:9 picture) instead of pillarboxing it.
+  if (effective.stretch_to_fill) plan.arguments.emplace_back("--present_letterbox=false");
 
   plan.environment = {
       {"REX_DEBUG_UI", "false"},
@@ -216,6 +233,9 @@ LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings& settings,
       {"WWE13_THREAD_PROFILE_OUT", ""},
       {"WWE13_LOCK_OWNER_SAMPLE", ""},
       {"WWE13_F24_PIXEL_RATE", "1"},
+      // Pace guest frames on the display's vblank when it runs at a multiple of 60 Hz (Windows only;
+      // on Linux the SDK's WaitForHostDisplayVBlank/GetHostDisplayRefreshHz are no-ops). Default on.
+      {"WWE13_HOST_VSYNC", effective.sync_to_display ? "1" : "0"},
       {"WWE13_INTERNAL_RES", resolution.internal ? resolution.internal : ""},
       {"WWE13_SCENE_AA", effective.anti_aliasing == AntiAliasing::kFaster2x ? "2x" : ""}};
 #ifndef _WIN32

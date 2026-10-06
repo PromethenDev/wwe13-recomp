@@ -65,6 +65,7 @@ for input in "$WIN_EXE" "$LINUX_EXE" \
              "$LAUNCHER2_WIN_EXE" "$LAUNCHER2_LINUX_EXE" \
              "$ROOT/launcher2/thirdparty/miniz/miniz.h" \
              "$ROOT/README.md" "$ROOT/DISCLAIMER.md" "$ROOT/LICENSE" \
+             "$ROOT/RELEASE-NOTES-v1.2.md" \
              "$SDK_ROOT/LICENSE" "$SDK_FFMPEG/COPYING.LGPLv2.1" \
              "$SDK_ROOT/thirdparty/CMakeLists.txt"; do
   test -f "$input" || { printf 'Missing required package input: %s\n' "$input" >&2; exit 2; }
@@ -147,7 +148,7 @@ if start < 0:
 end = text.find("*/", start)
 open(sys.argv[2], "w", encoding="utf-8").write(text[start:end if end > 0 else None].strip() + "\n")
 PY
-cp "$ROOT/README.md" "$ROOT/DISCLAIMER.md" "$ROOT/LICENSE" "$STAGE/"
+cp "$ROOT/README.md" "$ROOT/DISCLAIMER.md" "$ROOT/LICENSE" "$ROOT/RELEASE-NOTES-v1.2.md" "$STAGE/"
 cp "$SDK_FFMPEG/COPYING.LGPLv2.1" "$STAGE/licenses/FFmpeg-LGPL-2.1.txt"
 
 # Preserve SDK and vendored dependency LICENSE/COPYING/NOTICE texts. Keep their

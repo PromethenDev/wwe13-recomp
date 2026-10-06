@@ -7,6 +7,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -160,6 +161,33 @@ class Wwe13App : public rex::ReXApp {
     }
 #endif
     std::exit(EXIT_FAILURE);
+  }
+
+  void OnGraphicsSetupFailed(rex::X_STATUS status) override {
+    (void)status;
+    constexpr char kNoGpuMessage[] =
+        "WWE '13 couldn't find a graphics card it can use. Update your graphics driver, then try "
+        "again.\n\n"
+        "On laptops with two graphics chips, set wwe13.exe to 'High performance' in Windows "
+        "Settings > System > Display > Graphics.";
+    REXLOG_ERROR("[wwe13] no usable graphics card at startup: {}", kNoGpuMessage);
+    rex::FlushLogging();
+#ifdef _WIN32
+    MessageBoxW(nullptr, L"WWE '13 couldn't find a graphics card it can use. Update your graphics "
+                         L"driver, then try again.\n\n"
+                         L"On laptops with two graphics chips, set wwe13.exe to 'High performance' "
+                         L"in Windows Settings > System > Display > Graphics.",
+                L"WWE '13", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+#else
+    // Linux: the log and stderr are enough (no modal dialog to hang headless
+    // CI); the platform entry point exits with a normal failure status.
+    std::fputs(
+        "WWE '13 couldn't find a graphics card it can use. Update your graphics driver, then try "
+        "again.\n"
+        "On laptops with two graphics chips, set wwe13.exe to 'High performance' in Windows "
+        "Settings > System > Display > Graphics.\n",
+        stderr);
+#endif
   }
 
   void OnShutdown() override {

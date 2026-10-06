@@ -3,6 +3,7 @@
 #include <cctype>
 
 #include "internal/stfs.h"
+#include "internal/util.h"
 
 #include <algorithm>
 #include <array>
@@ -119,7 +120,7 @@ bool MakeSafeOutputPath(const fs::path& base, const fs::path& relative, fs::path
 }
 
 bool ParseHexTitleId(const fs::path& path, uint32_t* title_id) {
-  const std::string name = path.filename().string();
+  const std::string name = internal::PathToUtf8(path.filename());
   if (name.size() != 8) {
     return false;
   }
@@ -169,7 +170,7 @@ bool ReadFolderPackageInfo(const fs::path& path, PackageInfo* info, std::string*
   if (!fs::is_directory(path, filesystem_error) || filesystem_error) {
     return false;
   }
-  const std::string content_type_name = path.parent_path().filename().string();
+  const std::string content_type_name = internal::PathToUtf8(path.parent_path().filename());
   uint32_t content_type = 0;
   if (content_type_name == "00000002") {
     content_type = kDlcContentType;
@@ -183,7 +184,7 @@ bool ReadFolderPackageInfo(const fs::path& path, PackageInfo* info, std::string*
   } else {
     fs::path ancestor = path.parent_path();
     for (unsigned depth = 0; depth < 6 && !ancestor.empty(); ++depth, ancestor = ancestor.parent_path()) {
-      const std::string component = ancestor.filename().string();
+      const std::string component = internal::PathToUtf8(ancestor.filename());
       if (component == "00000002" || component == "000B0000") {
         continue;
       }
@@ -349,7 +350,7 @@ bool GatherFolderFiles(const fs::path& root, PackageSource* source, std::string*
 bool ContainsDefaultXexp(const PackageSource& source) {
   for (const auto& file : source.files) {
     if (file.relative_path.parent_path().empty() &&
-        file.relative_path.filename().string() == "default.xexp") {
+        internal::PathToUtf8(file.relative_path.filename()) == "default.xexp") {
       return true;
     }
   }
@@ -756,7 +757,7 @@ FolderInstallables FindInstallableFiles(const fs::path& folder) {
     for (fs::directory_iterator it(folder, error), end; !error && it != end; it.increment(error)) {
       const fs::path path = it->path();
       if (!it->is_regular_file(error)) continue;
-      std::string extension = path.extension().string();
+      std::string extension = internal::PathToUtf8(path.extension());
       std::transform(extension.begin(), extension.end(), extension.begin(),
                      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
       if (extension == ".iso" || extension == ".img") {

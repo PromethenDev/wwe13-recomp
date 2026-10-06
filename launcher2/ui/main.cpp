@@ -1,3 +1,14 @@
+// Keep windows.h (included below for the startup MessageBox) from defining min/max macros that would
+// break every std::min/std::max in this file.
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#endif
+
 #include "launcher_core.h"
 #include "native_keys.h"
 
@@ -41,6 +52,7 @@
 #include <fcntl.h>
 #include <io.h>
 #include <sys/stat.h>
+#include <windows.h>
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -65,6 +77,11 @@ constexpr ImVec4 kDanger{0.9608f, 0.3608f, 0.3725f, 1.0f};
 constexpr char kDropWaitMessage[] = "Please wait until the current task finishes, then drop the file again.";
 constexpr char kReadOnlyFolderMessage[] =
     "This folder is read-only. Move the WWE13-Recomp folder somewhere like Documents or Desktop and start it again.";
+// GitHub #8: shown on the Play page and as a banner when no Vulkan device exists, instead of starting
+// a game that cannot create its graphics device and closes.
+constexpr char kNoVulkanMessage[] =
+    "This PC has no graphics card with Vulkan 1.1 support, which WWE '13 Recomp needs. Update the "
+    "graphics driver, or use a PC with a Vulkan-capable graphics card.";
 
 enum class Tab { Play, Settings, Controls, Content, GameFiles };
 enum class ContentCategory { Superstars, Entrances, Arenas, Logos, Videos, Music, SaveData };
@@ -276,6 +293,8 @@ Settings ActiveSettings(const AppState& app) {
   settings.game_folder = app.settings.game_folder;
   settings.auto_start = app.settings.auto_start;
   settings.auto_backup = app.settings.auto_backup;
+  settings.stretch_to_fill = app.settings.stretch_to_fill;
+  settings.sync_to_display = app.settings.sync_to_display;
   settings.explicit_choice = false;
   return settings;
 }
@@ -405,6 +424,98 @@ void PerfLog(const char* format, ...) {
   ++g_perf_log_lines;
 }
 
+// GitHub #8: on a PC whose graphics driver cannot create any SDL_Renderer device the launcher used to
+// open no window and print nothing (the only SDL_LogError went to a GUI process's empty stderr). The
+// log is now opened before the window exists, every startup step is written to it, and a startup that
+// truly cannot show a window puts one plain-language dialog on screen naming the log file.
+fs::path LauncherLogFilePath() {
+  std::error_code error;
+  const fs::path logs_dir = ResolvePaths(LauncherExecutablePath()).logs_dir;
+  fs::create_directories(logs_dir, error);
+  return logs_dir / "launcher.log";
+}
+
+void OpenLauncherLog() {
+  if (g_perf_log) return;
+  const fs::path path = LauncherLogFilePath();
+#ifdef _WIN32
+  g_perf_log = _wfopen(path.c_str(), L"w");
+#else
+  g_perf_log = std::fopen(path.c_str(), "w");
+#endif
+  if (g_perf_log) {
+    const std::string path_utf8 = PathUtf8(path);
+    std::fprintf(g_perf_log, "[%8.3f s] launcher.log opened: %s\n", SDL_GetTicksNS() / 1e9,
+                 path_utf8.c_str());
+    std::fflush(g_perf_log);
+    ++g_perf_log_lines;
+  }
+}
+
+std::wstring Utf8ToWide(const std::string& text) {
+#ifdef _WIN32
+  return Utf8Path(text).wstring();
+#else
+  return std::wstring(text.begin(), text.end());
+#endif
+}
+
+void ShowStartupFailure(const std::string& message) {
+  PerfLog("fatal: %s", message.c_str());
+  const std::string full =
+      message + "\n\nA log was saved to:\n" + PathUtf8(LauncherLogFilePath());
+  std::fprintf(stderr, "%s\n", full.c_str());
+  std::fflush(stderr);
+#ifdef _WIN32
+  const std::wstring wide = Utf8ToWide(full);
+  MessageBoxW(nullptr, wide.c_str(), L"WWE '13 PC Recompiled",
+              MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+#else
+  SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "WWE '13 PC Recompiled", full.c_str(), nullptr);
+#endif
+}
+
+struct RendererChoice {
+  const char* driver;
+  const char* label;
+};
+
+std::vector<RendererChoice> StartupRendererChoices() {
+#ifdef _WIN32
+  std::vector<RendererChoice> choices = {{"direct3d11", "Direct3D 11"},
+                                         {"direct3d12", "Direct3D 12"},
+                                         {"opengl", "OpenGL"},
+                                         {"software", "software"}};
+#else
+  std::vector<RendererChoice> choices = {{"opengl", "OpenGL"}, {"software", "software"}};
+#endif
+  // A user-forced driver is tried first; the rest remain as fallbacks.
+  if (const char* requested = std::getenv("SDL_RENDER_DRIVER"); requested && *requested) {
+    choices.insert(choices.begin(), RendererChoice{requested, requested});
+  }
+  return choices;
+}
+
+bool CreateStartupRenderer(AppState& app) {
+  const char* force_fail = std::getenv("WWE13_LAUNCHER_TEST_RENDERER_FAIL");
+  const bool skip_all = force_fail && std::string_view(force_fail) == "1";
+  for (const RendererChoice& choice : StartupRendererChoices()) {
+    if (skip_all) {
+      PerfLog("renderer %s: skipped (test hook)", choice.driver);
+      continue;
+    }
+    SDL_ClearError();
+    app.renderer = SDL_CreateRenderer(app.window, choice.driver);
+    if (app.renderer) {
+      PerfLog("renderer=%s (%s) video_driver=%s", SDL_GetRendererName(app.renderer), choice.label,
+              SDL_GetCurrentVideoDriver());
+      return true;
+    }
+    PerfLog("renderer %s failed: %s", choice.label, SDL_GetError());
+  }
+  return false;
+}
+
 void SaveSettings(AppState& app) {
   const Uint64 start = SDL_GetTicksNS();
   const Result result = wwe13::launcher::SaveSettings(app.paths, app.settings);
@@ -429,6 +540,10 @@ void StartRefreshGameFiles(AppState& app) {
 void StartLaunch(AppState& app);
 
 void LaunchNow(AppState& app) {
+  if (app.gpus.empty()) {
+    SetBanner(app, kNoVulkanMessage);
+    return;
+  }
   if (!app.game_files.ready()) {
     SetBanner(app, "Game files need attention before you can play.");
     app.tab = Tab::GameFiles;
@@ -450,6 +565,10 @@ void LaunchNow(AppState& app) {
 
 void StartLaunch(AppState& app) {
   if (app.job.active.load()) return;
+  if (app.gpus.empty()) {
+    SetBanner(app, kNoVulkanMessage);
+    return;
+  }
   if (!app.game_files.ready()) {
     SetBanner(app, "Add the base game and Title Update 2.0.1.0 to continue.");
     app.tab = Tab::GameFiles;
@@ -516,6 +635,7 @@ void StartInitialization(AppState& app) {
                          app.paths = paths;
                          app.settings = settings;
                         app.gpus = gpus;
+                        PerfLog("vulkan_devices=%zu", gpus.size());
                         app.recommendation = recommendation;
                         app.game_files = game_files;
                           app.songs = songs;
@@ -1205,7 +1325,7 @@ void ProcessDrops(AppState& app) {
         StartChooseGameFolder(app, file);
         return;
       }
-      std::string extension = file.extension().string();
+      std::string extension = PathUtf8(file.extension());
       std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
         return static_cast<char>(std::tolower(c));
       });
@@ -1442,6 +1562,9 @@ DialogResult LauncherDialog(const AppState& app, bool& open, const char* id, con
 
 void DrawPlay(AppState& app) {
   const Settings current = ActiveSettings(app);
+  // GitHub #8: with no Vulkan device the game cannot start, so say so on this page instead of offering
+  // a PLAY button that closes the launcher and fails a few seconds later.
+  const bool vulkan_available = !app.gpus.empty();
   const float width = ImGui::GetContentRegionAvail().x;
   const bool compact = ImGui::GetIO().DisplaySize.y < S(app, 700.0f);
   const float hero_height = S(app, compact ? 236.0f : 330.0f);
@@ -1452,16 +1575,22 @@ void DrawPlay(AppState& app) {
   ImGui::BeginChild("play-hero", hero_size, true, ImGuiWindowFlags_NoScrollbar);
   ImGui::SetCursorPos(S(app, 28.0f, compact ? 50.0f : 92.0f));
   ImGui::PushFont(app.fonts.oswald_bold);
-  ImGui::PushStyleColor(ImGuiCol_Text, kText);
-  ImGui::TextUnformatted("READY TO PLAY");
+  ImGui::PushStyleColor(ImGuiCol_Text, vulkan_available ? kText : kDanger);
+  ImGui::TextUnformatted(vulkan_available ? "READY TO PLAY" : "THIS PC CAN'T RUN IT");
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::SetCursorPos(S(app, 30.0f, compact ? 128.0f : 181.0f));
   ImGui::PushFont(app.fonts.barlow_small);
   ImGui::PushStyleColor(ImGuiCol_Text, kSecondary);
-  ImGui::TextWrapped("Recommended for this PC: %s · settings picked automatically",
-                     app.recommendation.reason.c_str());
-  ImGui::TextUnformatted("To quit the game, press Alt+F4.");
+  if (vulkan_available) {
+    ImGui::TextWrapped("Recommended for this PC: %s · settings picked automatically",
+                       app.recommendation.reason.c_str());
+    ImGui::TextUnformatted("To quit the game, press Alt+F4.");
+  } else {
+    ImGui::PushStyleColor(ImGuiCol_Text, kDanger);
+    ImGui::TextWrapped("%s", kNoVulkanMessage);
+    ImGui::PopStyleColor();
+  }
   ImGui::PopStyleColor();
   ImGui::PopFont();
   ImGui::EndChild();
@@ -1508,7 +1637,7 @@ void DrawPlay(AppState& app) {
   const float controls_height = pad_inline ? S(app, 103.0f) : S(app, 150.0f);
   ImGui::BeginChild("play-controls", ImVec2(0, controls_height), false,
                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-  ImGui::BeginDisabled(!app.game_files.ready() || app.job.active.load());
+  ImGui::BeginDisabled(!app.game_files.ready() || app.job.active.load() || !vulkan_available);
   ImGui::PushFont(app.fonts.oswald_bold);
   if (AccentButton(app, "PLAY", ImVec2(play_width, S(app, 64.0f)))) StartLaunch(app);
   ImGui::PopFont();
@@ -1563,11 +1692,15 @@ void DrawSettings(AppState& app) {
     const fs::path game_folder = app.settings.game_folder;
     const bool auto_start = app.settings.auto_start;
     const bool auto_backup = app.settings.auto_backup;
+    const bool stretch_to_fill = app.settings.stretch_to_fill;
+    const bool sync_to_display = app.settings.sync_to_display;
     app.settings = app.recommendation.settings;
     app.settings.gpu_id = selected_gpu_id;
     app.settings.game_folder = game_folder;
     app.settings.auto_start = auto_start;
     app.settings.auto_backup = auto_backup;
+    app.settings.stretch_to_fill = stretch_to_fill;
+    app.settings.sync_to_display = sync_to_display;
     app.settings.explicit_choice = false;
     SaveSettings(app);
   }
@@ -1704,6 +1837,35 @@ void DrawSettings(AppState& app) {
     }
     ImGui::EndCombo();
   }
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+
+  // Screen options are personal preferences (like auto backup), so they never switch off Recommended.
+  ImGui::Spacing();
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, kRaised);
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(app, 10.0f));
+  ImGui::BeginChild("settings-screen-row", ImVec2(0, S(app, compact ? 44.0f : 52.0f)), false,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::SetCursorPos(S(app, 14, compact ? 10.0f : 14.0f));
+  // The row background is kRaised, the same as the theme's FrameBg, so an unticked box would be
+  // invisible: give these boxes a darker fill and a visible outline.
+  ImGui::PushStyleColor(ImGuiCol_FrameBg, kWindow);
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, kPanel);
+  ImGui::PushStyleColor(ImGuiCol_Border, kMuted);
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, S(app, 1.0f));
+  if (ImGui::Checkbox("Stretch to fill wide screens", &app.settings.stretch_to_fill)) SaveSettings(app);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("Fill a 21:9 or 16:10 screen instead of showing black bars. The 16:9 picture is stretched.");
+  }
+  ImGui::SameLine(0.0f, S(app, 28.0f));
+  if (ImGui::Checkbox("Sync frames to the monitor", &app.settings.sync_to_display)) SaveSettings(app);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("Windows only. Turn off if fullscreen stutters on a high refresh rate or "
+                      "FreeSync / G-SYNC monitor.");
+  }
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(3);
   ImGui::EndChild();
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();
@@ -2931,7 +3093,7 @@ void DrawSidebar(AppState& app) {
   ImGui::PopStyleColor();
   ImGui::SetCursorPosY(ImGui::GetWindowHeight() - S(app, 36.0f));
   ImGui::PushFont(app.fonts.barlow_small);
-  ImGui::TextColored(kMuted, "v1.1 · Windows & Linux");
+  ImGui::TextColored(kMuted, "v1.2 · Windows & Linux");
   ImGui::PopFont();
   ImGui::EndChild();
   ImGui::PopStyleVar();
@@ -3326,29 +3488,37 @@ bool Initialize(AppState& app, int argc, char** argv) {
       app.userdata_override = Utf8Path(argv[++i]);
     }
   }
+  OpenLauncherLog();
+  PerfLog("startup: begin (build " __DATE__ " " __TIME__ ")");
   if (app.screenshot_mode) {
     std::error_code error;
     fs::create_directories(app.screenshot_dir, error);
     if (error) {
-      SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not create screenshot folder: %s", error.message().c_str());
+      ShowStartupFailure("WWE '13 Recomp could not create its screenshot folder.");
       return false;
     }
   }
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not open the launcher window: %s", SDL_GetError());
+    ShowStartupFailure(std::string("WWE '13 Recomp could not open its window on this PC.\n\n"
+                       "This usually means the graphics driver is missing or too old. ") +
+                       kNoVulkanMessage);
     return false;
   }
+  PerfLog("startup: SDL_Init ok, video_driver=%s", SDL_GetCurrentVideoDriver());
   app.window = SDL_CreateWindow("WWE '13 PC Recompiled", app.startup_width, app.startup_height,
                                 SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (!app.window) {
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not open the launcher window: %s", SDL_GetError());
+    ShowStartupFailure(std::string("WWE '13 Recomp could not open its window on this PC.\n\n") +
+                       kNoVulkanMessage + "\n\nDetails: " + SDL_GetError());
     return false;
   }
+  PerfLog("startup: window created");
   SDL_PumpEvents();
   app.shift_at_start = app.test_shift_held || wwe13::launcher::ui::ShiftDownAtLaunch(app.window);
-  app.renderer = SDL_CreateRenderer(app.window, nullptr);
-  if (!app.renderer) {
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not draw the launcher window: %s", SDL_GetError());
+  if (!CreateStartupRenderer(app)) {
+    ShowStartupFailure(std::string("WWE '13 Recomp could not start its window on this PC.\n\n"
+                       "This usually means the graphics driver is missing or too old. ") +
+                       kNoVulkanMessage);
     return false;
   }
   SDL_SetRenderVSync(app.renderer, 1);
@@ -3493,15 +3663,9 @@ int main(int argc, char** argv) {
   // Vsync paces active frames. After a few frames without input (and with nothing running),
   // block until the next event instead of polling, so the UI reacts immediately but idles cheaply.
   {
-    std::error_code error;
-    // app.paths is filled by the background initialization job; resolve the logs folder directly.
-    const fs::path logs_dir = ResolvePaths(LauncherExecutablePath()).logs_dir;
-    fs::create_directories(logs_dir, error);
-#ifdef _WIN32
-    g_perf_log = _wfopen((logs_dir / "launcher.log").c_str(), L"w");
-#else
-    g_perf_log = std::fopen((logs_dir / "launcher.log").c_str(), "w");
-#endif
+    // Initialize() already opened logs/launcher.log before the window existed (GitHub #8); never
+    // reopen it here or the startup lines would be erased.
+    OpenLauncherLog();
     int vsync = 0;
     SDL_GetRenderVSync(app.renderer, &vsync);
     int width = 0;

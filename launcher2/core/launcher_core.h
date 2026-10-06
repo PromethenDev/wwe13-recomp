@@ -60,6 +60,8 @@ struct Settings {
   fs::path game_folder;  // folder holding default.xex + default.xexp
   bool auto_start = false;          // "Start straight away next time" (hold Shift at start to come back)
   bool auto_backup = true;          // back up saves before each launch, keep last 5
+  bool stretch_to_fill = false;     // stretch the 16:9 picture over wider screens (21:9) instead of black bars
+  bool sync_to_display = true;      // pace frames on the display's vblank (WWE13_HOST_VSYNC); off = steady timer
   bool explicit_choice = false;     // false = follow RecommendedSettings()
 };
 // Reads the existing wwe13-enhanced.ini (UTF-16LE with BOM written by the old launcher, or UTF-8) including

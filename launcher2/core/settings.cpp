@@ -216,7 +216,7 @@ std::string BuildIni(const Paths& paths, const Settings& settings) {
   const std::vector<std::string> old_lines = SplitLines(old_text);
   const std::set<std::string> replaced = {"schema", "anti_aliasing", "resolution", "frame_rate",
                                           "display", "gpu", "game_folder", "auto_start",
-                                          "auto_backup"};
+                                          "auto_backup", "stretch_to_fill", "sync_to_display"};
   std::vector<std::string> unknown_settings;
   std::vector<std::string> outside_settings;
   std::string active_section;
@@ -252,7 +252,9 @@ std::string BuildIni(const Paths& paths, const Settings& settings) {
          << "gpu=" << (settings.gpu_id.empty() ? "auto" : settings.gpu_id) << "\r\n"
          << "game_folder=" << PathToUtf8(settings.game_folder.empty() ? paths.default_game_folder : settings.game_folder)
          << "\r\nauto_start=" << (settings.auto_start ? "1" : "0")
-         << "\r\nauto_backup=" << (settings.auto_backup ? "1" : "0") << "\r\n";
+         << "\r\nauto_backup=" << (settings.auto_backup ? "1" : "0")
+         << "\r\nstretch_to_fill=" << (settings.stretch_to_fill ? "1" : "0")
+         << "\r\nsync_to_display=" << (settings.sync_to_display ? "1" : "0") << "\r\n";
   for (const auto& line : unknown_settings) output << line << "\r\n";
   if (!outside_settings.empty()) {
     output << "\r\n";
@@ -338,6 +340,12 @@ Settings LoadSettingsImpl(const Paths& paths) {
   const std::string auto_backup = IniValue(entries, "auto_backup");
   if (!auto_backup.empty()) {
     settings.auto_backup = auto_backup == "1" || EqualsAsciiInsensitive(auto_backup, "true");
+  }
+  const std::string stretch_to_fill = IniValue(entries, "stretch_to_fill");
+  settings.stretch_to_fill = stretch_to_fill == "1" || EqualsAsciiInsensitive(stretch_to_fill, "true");
+  const std::string sync_to_display = IniValue(entries, "sync_to_display");
+  if (!sync_to_display.empty()) {
+    settings.sync_to_display = sync_to_display == "1" || EqualsAsciiInsensitive(sync_to_display, "true");
   }
   settings.explicit_choice = resolution_explicit || frame_explicit;
   return settings;

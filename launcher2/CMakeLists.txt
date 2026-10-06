@@ -49,21 +49,24 @@ set(SDL_HAPTIC OFF CACHE BOOL "Launcher does not use haptics" FORCE)
 set(SDL_SENSOR OFF CACHE BOOL "Launcher does not use sensors" FORCE)
 set(SDL_TRAY OFF CACHE BOOL "Launcher does not use tray APIs" FORCE)
 set(SDL_VULKAN OFF CACHE BOOL "Launcher does not use SDL Vulkan" FORCE)
-# Hardware-accelerated SDL_Renderer: Direct3D 11 on Windows, OpenGL elsewhere (both loaded at run time,
-# no extra link dependencies); SDL falls back to its software renderer if neither can start. Software
-# only was too slow on high-DPI laptops (owner 2026-10-01: ~190 ms per frame at 2560x1520).
+# SDL_Renderer backends the launcher can fall back through at startup (GitHub #8: a PC whose Direct3D 11
+# driver cannot create a device saw a launcher that opened no window and said nothing). D3D11 -> D3D12 ->
+# OpenGL on Windows, OpenGL elsewhere, and SDL's always-built software renderer last (loaded at run time,
+# no extra link dependencies). Software only was too slow on high-DPI laptops (2026-10-01:
+# ~190 ms per frame at 2560x1520), so it exists only as the last resort.
 if(WIN32)
-  set(SDL_OPENGL OFF CACHE BOOL "Launcher uses Direct3D 11 on Windows" FORCE)
+  set(SDL_OPENGL ON CACHE BOOL "Launcher falls back to OpenGL on Windows" FORCE)
   set(SDL_RENDER_D3D11 ON CACHE BOOL "Launcher draws with Direct3D 11" FORCE)
+  set(SDL_RENDER_D3D12 ON CACHE BOOL "Launcher falls back to Direct3D 12" FORCE)
 else()
   set(SDL_OPENGL ON CACHE BOOL "Launcher draws with OpenGL" FORCE)
   set(SDL_RENDER_D3D11 OFF CACHE BOOL "Not available outside Windows" FORCE)
+  set(SDL_RENDER_D3D12 OFF CACHE BOOL "Not available outside Windows" FORCE)
 endif()
 set(SDL_OPENGLES OFF CACHE BOOL "Launcher does not use OpenGL ES" FORCE)
 set(SDL_RENDER_GPU OFF CACHE BOOL "Launcher does not use the SDL_GPU renderer" FORCE)
 set(SDL_RENDER_VULKAN OFF CACHE BOOL "Launcher does not use the Vulkan renderer" FORCE)
 set(SDL_RENDER_D3D OFF CACHE BOOL "Launcher does not use Direct3D 9" FORCE)
-set(SDL_RENDER_D3D12 OFF CACHE BOOL "Launcher does not use Direct3D 12" FORCE)
 add_subdirectory("${WWE13_SDL3_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/sdl3")
 
 add_library(wwe13_launcher_imgui STATIC
