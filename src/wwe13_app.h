@@ -26,6 +26,7 @@
 #include <spdlog/sinks/base_sink.h>
 
 #include "perf_overlay.h"
+#include "single_instance.h"
 #include "thread_profiler.h"
 #include "game_version_check.h"
 #include "release_diagnostics.h"
@@ -64,6 +65,28 @@ class Wwe13App : public rex::ReXApp {
 
   void OnPreSetup(rex::RuntimeConfig& config) override {
     (void)config;
+    // GitHub #6: a second start-up against the same user-data folder becomes a second game
+    // process fighting over the GPU (players hit this by clicking Play again while the first,
+    // slow shader-preparation start-up still looks frozen). Acquire the per-user-data lock
+    // before any graphics setup; a second instance says so and exits. Lanes/installations with
+    // their own --user_data_root keep working side by side.
+    if (!wwe13::AcquireUserDataInstanceLock(user_data_root_)) {
+      constexpr char kAlreadyRunningMessage[] =
+          "WWE '13 is already running with this game folder. Close the other game window (or "
+          "end wwe13.exe in Task Manager) and try again.\n";
+      REXLOG_ERROR("[wwe13] another game instance is already using {}; exiting",
+                   rex::path_to_utf8(user_data_root_));
+      rex::FlushLogging();
+#ifdef _WIN32
+      MessageBoxW(nullptr,
+                  L"WWE '13 is already running. Close the other game window first, then try "
+                  L"again.",
+                  L"WWE '13", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+#else
+      std::fputs(kAlreadyRunningMessage, stderr);
+#endif
+      std::exit(EXIT_FAILURE);
+    }
     wwe13::InitializeReleaseDiagnostics(game_data_root_, game_file_check_result_);
     wwe13::InitializeSceneResolutionOption();
     wwe13::InitializeEdramTilesForSceneResolution();

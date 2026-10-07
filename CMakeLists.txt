@@ -53,6 +53,7 @@ if(GIT_FOUND)
     endif()
   endif()
 endif()
+include(cmake/wwe13_version.cmake)
 string(TIMESTAMP WWE13_BUILD_DATE "%Y-%m-%dT%H:%M:%SZ" UTC)
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 configure_file(src/wwe13_build_info.h.in
@@ -62,6 +63,7 @@ add_executable(wwe13
   src/main.cpp
   src/game_version_check.cpp
   src/release_diagnostics.cpp
+  src/single_instance.cpp
   src/dlist_tripwire.cpp
   src/perf_overlay.cpp
   src/thread_profiler.cpp

@@ -1,0 +1,5 @@
+#pragma once
+
+// Generated from VERSION by cmake/wwe13_version.cmake.
+#define WWE13_LAUNCHER_VERSION "@WWE13_VERSION@"
+#define WWE13_LAUNCHER_BUILD_COMMIT "@WWE13_VERSION_COMMIT@"

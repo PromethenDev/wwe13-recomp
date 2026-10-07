@@ -23,7 +23,7 @@ You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game fil
 
 ## Install and play
 
-1. Download `WWE13-Recomp-v1.2.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
+1. Download `WWE13-Recomp-v1.3.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
 2. Start **`WWE13 Launcher.exe`** (Linux: `Linux-x86_64/wwe13-launcher`).
 3. In **Game files**, do one of the following:
    - put your game folder in the `WWE 13` folder beside the launcher, or

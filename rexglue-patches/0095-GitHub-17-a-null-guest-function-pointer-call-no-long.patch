@@ -1,0 +1,73 @@
+From cd64f78d67aff6de2783daa77cbfc4108bc08a3c Mon Sep 17 00:00:00 2001
+From: PromethenDev <PromethenDev@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 08:49:15 -0700
+Subject: [PATCH 95/96] GitHub #17: a null guest function-pointer call no
+ longer kills the game. PPC_LOOKUP_FUNC indexed the function table unchecked,
+ so an out-of-range target (ctr=0) faulted (SIGSEGV at table base -
+ CODE_BASE*2) before PPCHandleMissingIndirectFunction could run; the lookup is
+ now bounds-checked (image + thunk reserve) and a guest_address==0 call is
+ logged and skipped (non-null uncompiled targets stay fatal). Paint Tool >
+ Logo > LETTERING (dtor of the ED57.PAC loader object calls a null slot,
+ lr=0x82BD2A24) now opens and a letter can be placed (2/2 live runs, wwe13
+ 82d4256f). Why the slot is null is unexplained (the game works on Xbox/Xenia)
+ - logged as [missing-function] (DeepSeek Flash worker GH3, Claude reviewed +
+ looked at the placed letter)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/ppc/context.h | 17 ++++++++++++++---
+ src/system/xmemory.cpp    |  9 +++++++++
+ 2 files changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/include/rex/ppc/context.h b/include/rex/ppc/context.h
+index 0f324ad..b1d88d9 100644
+--- a/include/rex/ppc/context.h
++++ b/include/rex/ppc/context.h
+@@ -143,10 +143,21 @@ uint64_t PPCMissingIndirectFunctionCallCount() noexcept;
+ // Requires ppc_config.h to be included first.
+ 
+ #ifdef PPC_CONFIG_H_INCLUDED
+-// Function table lookup: indexed by (addr - CODE_BASE)
++// Function table lookup: indexed by (addr - CODE_BASE).
++// The index is (uint32_t(y) - PPC_CODE_BASE) * 2, so a guest target outside
++// [CODE_BASE, CODE_BASE + CODE_SIZE) (a null/garbage indirect-call target, or
++// a runtime thunk slot) would index an address outside the table and fault
++// before PPCHandleMissingIndirectFunction can run (GH3/#17: a null guest
++// function-pointer call died with SIGSEGV at 0x7F2E0000). Bound the target to
++// the image + thunk reserve; out-of-range returns nullptr so the missing-
++// function path gets the call instead.
+ #undef PPC_LOOKUP_FUNC
+-#define PPC_LOOKUP_FUNC(x, y) \
+-  (*(PPCFunc**)(x + PPC_IMAGE_BASE + PPC_IMAGE_SIZE + (uint64_t(uint32_t(y) - PPC_CODE_BASE) * 2)))
++#define PPC_LOOKUP_FUNC(x, y)                                                        \
++  ((uint32_t(y) >= PPC_CODE_BASE &&                                                  \
++    uint32_t(y) < PPC_IMAGE_BASE + PPC_IMAGE_SIZE + 0x10000u)                        \
++       ? (*(PPCFunc**)((x) + PPC_IMAGE_BASE + PPC_IMAGE_SIZE +                       \
++                       (uint64_t(uint32_t(y) - PPC_CODE_BASE) * 2)))                 \
++       : static_cast<PPCFunc*>(nullptr))
+ 
+ #undef PPC_CALL_INDIRECT_FUNC
+ #include <rex/perf/counter.h>
+diff --git a/src/system/xmemory.cpp b/src/system/xmemory.cpp
+index 83f138d..17a59c0 100644
+--- a/src/system/xmemory.cpp
++++ b/src/system/xmemory.cpp
+@@ -65,6 +65,15 @@ void PPCHandleMissingIndirectFunction(PPCContext& ctx, [[maybe_unused]] uint8_t*
+     }
+   }
+ 
++  // GH3/#17: a null guest function pointer has no callable target. Some title
++  // objects build their method table at construction and leave a slot null; a
++  // destructor that calls it should not take the whole process down. Skip the
++  // call (a no-op) instead of aborting. Non-null but uncompiled addresses keep
++  // the fatal default below.
++  if (guest_address == 0) {
++    return;
++  }
++
+   const char* continue_on_missing = std::getenv("WWE13_MISSING_FN_CONTINUE");
+   if (continue_on_missing && std::strcmp(continue_on_missing, "1") == 0) {
+     return;
+-- 
+2.43.0
+

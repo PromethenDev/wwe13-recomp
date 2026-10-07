@@ -1,0 +1,38 @@
+From 161c62272f9862ba779433c544e6d644a4fa4616 Mon Sep 17 00:00:00 2001
+From: PromethenDev <PromethenDev@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 10:52:15 -0700
+Subject: [PATCH 96/96] mnk input: preserve letter case for text-entry
+ SelectChar (GitHub #19)
+
+Shift/Caps Lock typing produced only lower case in Create-a-Story dialogue
+because the character was upper-cased before SelectChar. Pass it through.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/input/mnk/mnk_input_driver.cpp | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/input/mnk/mnk_input_driver.cpp b/src/input/mnk/mnk_input_driver.cpp
+index 5cb694f..db16851 100644
+--- a/src/input/mnk/mnk_input_driver.cpp
++++ b/src/input/mnk/mnk_input_driver.cpp
+@@ -254,11 +254,11 @@ X_RESULT MnkInputDriver::GetState(uint32_t user_index, X_INPUT_STATE* out_state)
+           action_button = X_INPUT_GAMEPAD_Y;
+           continue;
+         }
+-        char16_t upper = input.character;
+-        if (upper >= u'a' && upper <= u'z') {
+-          upper = static_cast<char16_t>(upper - (u'a' - u'A'));
+-        }
+-        if (text_entry_target->SelectChar(upper)) {
++        // Preserve the character's case: the title's on-screen keyboard may
++        // render a lower-case layer (e.g. dialogue text) or an upper-case layer
++        // (e.g. name fields), so the Shift/Caps Lock result must reach
++        // SelectChar unchanged.
++        if (text_entry_target->SelectChar(input.character)) {
+           action_button = X_INPUT_GAMEPAD_A;
+         }
+       }
+-- 
+2.43.0
+

@@ -107,6 +107,11 @@ add_custom_command(OUTPUT "${WWE13_EMBEDDED_FONTS}"
   DEPENDS wwe13_font_compressor "${CMAKE_CURRENT_LIST_DIR}/ui/generate_fonts.py" ${WWE13_FONT_FILES}
   VERBATIM)
 
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/wwe13_version.cmake")
+configure_file("${CMAKE_CURRENT_LIST_DIR}/launcher_version.h.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/version/launcher_version.h" @ONLY)
+include_directories("${CMAKE_CURRENT_BINARY_DIR}/version")
+
 if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/core/CMakeLists.txt")
   add_subdirectory(core)
 endif()

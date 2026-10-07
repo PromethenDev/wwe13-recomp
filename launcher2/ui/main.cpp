@@ -10,6 +10,7 @@
 #endif
 
 #include "launcher_core.h"
+#include "launcher_version.h"
 #include "native_keys.h"
 
 #include "imgui.h"
@@ -3093,7 +3094,7 @@ void DrawSidebar(AppState& app) {
   ImGui::PopStyleColor();
   ImGui::SetCursorPosY(ImGui::GetWindowHeight() - S(app, 36.0f));
   ImGui::PushFont(app.fonts.barlow_small);
-  ImGui::TextColored(kMuted, "v1.2 · Windows & Linux");
+  ImGui::TextColored(kMuted, "v%s · build %s", WWE13_LAUNCHER_VERSION, WWE13_LAUNCHER_BUILD_COMMIT);
   ImGui::PopFont();
   ImGui::EndChild();
   ImGui::PopStyleVar();
@@ -3505,7 +3506,7 @@ bool Initialize(AppState& app, int argc, char** argv) {
     return false;
   }
   PerfLog("startup: SDL_Init ok, video_driver=%s", SDL_GetCurrentVideoDriver());
-  app.window = SDL_CreateWindow("WWE '13 PC Recompiled", app.startup_width, app.startup_height,
+  app.window = SDL_CreateWindow("WWE '13 PC Recompiled v" WWE13_LAUNCHER_VERSION, app.startup_width, app.startup_height,
                                 SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (!app.window) {
     ShowStartupFailure(std::string("WWE '13 Recomp could not open its window on this PC.\n\n") +

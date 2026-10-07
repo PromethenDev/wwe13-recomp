@@ -1,4 +1,5 @@
 #include "launcher_core.h"
+#include "launcher_version.h"
 
 #include "internal/archive.h"
 #include "internal/util.h"
@@ -23,6 +24,7 @@ namespace {
 
 std::string SystemSummary() {
   std::ostringstream summary;
+  summary << "Launcher version: " << WWE13_LAUNCHER_VERSION << " (build " << WWE13_LAUNCHER_BUILD_COMMIT << ")\n";
 #ifdef _WIN32
   SYSTEM_INFO system_info{};
   GetNativeSystemInfo(&system_info);

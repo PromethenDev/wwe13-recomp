@@ -471,6 +471,10 @@ struct CrashEvent {
 
 constexpr int kFatalSignals[] = {SIGSEGV, SIGILL, SIGFPE, SIGABRT, SIGBUS};
 int g_crash_log_fd = -1;
+// GH3/#17 diagnostic: when WWE13_CRASH_GUEST_CTX=1, the fatal-signal report also
+// dumps the guest PPCContext (rbx), the guest memory base (r14) and the object /
+// vtable words at the fault, to identify a wild indirect-call target. Read-only.
+bool g_dump_guest_ctx = false;
 // Load base of the executable, so the signal-safe report can print a module offset for addr2line.
 std::uintptr_t g_exe_base = 0;
 int g_request_pipe[2] = {-1, -1};
@@ -681,6 +685,54 @@ void WriteCrashDetailsSignalSafe(void* signal_context) {
   length = AppendLiteral(block, length, capacity, "executable mappings:\n");
   WriteAllSignalSafe(block, length);
 
+#if defined(__x86_64__) && defined(REG_RIP)
+  // Optional GH3/#17 diagnostic: identify a wild guest indirect-call target.
+  if (g_dump_guest_ctx && signal_context) {
+    const auto& gregs = static_cast<const ucontext_t*>(signal_context)->uc_mcontext.gregs;
+    const std::uintptr_t membase = static_cast<std::uintptr_t>(gregs[REG_R14]);
+    const std::uintptr_t ctx = static_cast<std::uintptr_t>(gregs[REG_RBX]);
+    auto guest_u32 = [](std::uintptr_t address) -> std::uint32_t {
+      return __builtin_bswap32(*reinterpret_cast<volatile std::uint32_t*>(address));
+    };
+    char gblock[640];
+    std::size_t glen = 0;
+    const std::size_t gcap = sizeof(gblock);
+    glen = AppendLiteral(gblock, glen, gcap, "guest_dump: ctx=");
+    AppendHex(gblock, glen, gcap, ctx);
+    glen = AppendLiteral(gblock, glen, gcap, " base=");
+    AppendHex(gblock, glen, gcap, membase);
+    const std::uint32_t guest_this = guest_u32(ctx + 8);  // PPCContext::r3
+    const std::uint32_t saved_this = guest_u32(ctx + 0x100);  // the code saved ctx.r3 here
+    glen = AppendLiteral(gblock, glen, gcap, " r3=");
+    AppendHex(gblock, glen, gcap, guest_this);
+    glen = AppendLiteral(gblock, glen, gcap, " saved_r3=");
+    AppendHex(gblock, glen, gcap, saved_this);
+    glen = AppendLiteral(gblock, glen, gcap, " lr=");
+    AppendHex(gblock, glen, gcap, guest_u32(ctx + 0x108));
+    if (guest_this != 0) {
+      const std::uint32_t raw_field4 = *reinterpret_cast<volatile std::uint32_t*>(
+          static_cast<std::uintptr_t>(membase + guest_this + 4));
+      const std::uint32_t field4 = __builtin_bswap32(raw_field4);
+      glen = AppendLiteral(gblock, glen, gcap, " raw4=");
+      AppendHex(gblock, glen, gcap, raw_field4);
+      glen = AppendLiteral(gblock, glen, gcap, " field4=");
+      AppendHex(gblock, glen, gcap, field4);
+      glen = AppendLiteral(gblock, glen, gcap, " this_words:");
+      for (int i = 0; i < 8; ++i) {
+        glen = AppendLiteral(gblock, glen, gcap, " ");
+        AppendHex(gblock, glen, gcap, guest_u32(membase + guest_this + i * 4));
+      }
+      glen = AppendLiteral(gblock, glen, gcap, " vtbl_words:");
+      for (int i = 0; i < 16; ++i) {
+        glen = AppendLiteral(gblock, glen, gcap, " ");
+        AppendHex(gblock, glen, gcap, guest_u32(membase + field4 + i * 4));
+      }
+    }
+    glen = AppendLiteral(gblock, glen, gcap, "\n");
+    WriteAllSignalSafe(gblock, glen);
+  }
+#endif
+
   // Copy only the r-xp lines of /proc/self/maps (the guest heap mappings are not executable).
   const int maps_fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
   if (maps_fd < 0) {
@@ -784,6 +836,7 @@ void InstallPlatformCrashHandler(const std::string& log_path) {
   if (dladdr(reinterpret_cast<void*>(&CrashSignalHandler), &self_info) && self_info.dli_fbase) {
     g_exe_base = reinterpret_cast<std::uintptr_t>(self_info.dli_fbase);
   }
+  g_dump_guest_ctx = std::getenv("WWE13_CRASH_GUEST_CTX") != nullptr;
   // Load and initialise the unwinder now; the first backtrace() call may allocate.
   void* prime_frames[2];
   backtrace(prime_frames, 2);
@@ -846,8 +899,8 @@ void LogHeader(const std::filesystem::path& game_folder,
   const std::string cores_ram = CoreCountAndRam();
 
   REXLOG_INFO("========== WWE '13 BUG REPORT PROFILE BEGIN ==========");
-  REXLOG_INFO("build: git={} dirty={} date_utc={} sdk_git={} sdk_dirty={}", WWE13_BUILD_COMMIT,
-              WWE13_BUILD_DIRTY, WWE13_BUILD_DATE, WWE13_SDK_COMMIT, WWE13_SDK_DIRTY);
+  REXLOG_INFO("build: version={} git={} dirty={} date_utc={} sdk_git={} sdk_dirty={}", WWE13_VERSION,
+              WWE13_BUILD_COMMIT, WWE13_BUILD_DIRTY, WWE13_BUILD_DATE, WWE13_SDK_COMMIT, WWE13_SDK_DIRTY);
   REXLOG_INFO("host: os={} cpu={} cores_ram={}", OsVersion(), CpuName(), cores_ram);
   REXLOG_INFO("power: {}", PowerState());
   REXLOG_INFO(

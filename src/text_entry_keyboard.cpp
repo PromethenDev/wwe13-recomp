@@ -10,6 +10,7 @@
 
 #include <rex/input/input_system.h>
 #include <rex/input/text_entry.h>
+#include <rex/logging.h>
 #include <rex/ppc/context.h>
 #include <rex/runtime.h>
 #include <rex/system/kernel_state.h>
@@ -24,6 +25,11 @@ std::atomic<rex::memory::Memory*> g_guest_memory{nullptr};
 bool IsKeyboardTypingEnabled() {
   const char* const value = std::getenv("WWE13_KEYBOARD_TYPING");
   return !(value && std::strcmp(value, "0") == 0);
+}
+
+bool IsKeyboardTypingLogEnabled() {
+  const char* const value = std::getenv("WWE13_KEYBOARD_TYPING_LOG");
+  return value && std::strcmp(value, "0") != 0;
 }
 
 uint32_t ReadBe32(const rex::memory::Memory* memory, uint32_t address) {
@@ -56,10 +62,6 @@ struct KeyLocation {
 };
 
 bool MapCharacter(char16_t character, KeyLocation* location) {
-  if (character >= u'a' && character <= u'z') {
-    character = static_cast<char16_t>(character - (u'a' - u'A'));
-  }
-
   constexpr char16_t kNormalDigits[] = u"1234567890";
   constexpr char16_t kShiftedDigits[] = u"!@#$%^&*()";
   for (uint32_t i = 0; i < 10; ++i) {
@@ -138,24 +140,38 @@ bool MapCharacter(char16_t character, KeyLocation* location) {
       break;
   }
 
+  // Letters keep their case in the shift layer: 0 selects the grid's normal
+  // (lower-case in dialogue fields) glyph, 1 the upper-case glyph. The game's
+  // on-screen keyboard renders lower case for dialogue and upper case for
+  // upper-case-locked fields (e.g. NAME STORY), so the case must be preserved
+  // here instead of being forced to the shift-0 layer.
+  uint32_t shifted = 0;
+  if (character >= u'a' && character <= u'z') {
+    character = static_cast<char16_t>(character - (u'a' - u'A'));
+  } else if (character >= u'A' && character <= u'Z') {
+    shifted = 1;
+  } else {
+    return false;
+  }
+
   constexpr char16_t kTopRow[] = u"QWERTYUIOP";
   constexpr char16_t kHomeRow[] = u"ASDFGHJKL";
   constexpr char16_t kBottomRow[] = u"ZXCVBNM";
   for (uint32_t i = 0; i < 10; ++i) {
     if (character == kTopRow[i]) {
-      *location = {16 + i, 0};
+      *location = {16 + i, shifted};
       return true;
     }
   }
   for (uint32_t i = 0; i < 9; ++i) {
     if (character == kHomeRow[i]) {
-      *location = {31 + i, 0};
+      *location = {31 + i, shifted};
       return true;
     }
   }
   for (uint32_t i = 0; i < 7; ++i) {
     if (character == kBottomRow[i]) {
-      *location = {44 + i, 0};
+      *location = {44 + i, shifted};
       return true;
     }
   }
@@ -196,6 +212,10 @@ class Wwe13TextEntryTarget final : public rex::input::TextEntryTarget {
       }
       WriteBe32(memory, address + 0x28, location.index);
       WriteBe32(memory, address + 0x20, location.shifted);
+      if (IsKeyboardTypingLogEnabled()) {
+        REXLOG_INFO("[wwe13-keyboard] typed U+{:04X} -> key {} shift {}", uint32_t(character),
+                    location.index, location.shifted);
+      }
       return true;
     }
     return false;

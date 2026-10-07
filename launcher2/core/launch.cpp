@@ -24,7 +24,9 @@
 #include <windows.h>
 #else
 #include <cerrno>
+#include <fcntl.h>
 #include <spawn.h>
+#include <sys/file.h>
 #include <sys/wait.h>
 #include <unistd.h>
 extern char** environ;
@@ -32,6 +34,51 @@ extern char** environ;
 
 namespace wwe13::launcher {
 namespace {
+
+// GitHub #6: single-instance guard keyed on the user-data folder. This mirrors
+// src/single_instance.cpp in the game (same FNV-1a key, same lock name/format),
+// so the launcher can warn before starting a game that is already running while
+// leaving parallel test lanes (distinct --user_data_root paths) unaffected.
+bool GameAlreadyRunning(const fs::path& user_data_root) {
+  if (user_data_root.empty()) return false;
+  std::error_code canonical_error;
+  const fs::path canonical = fs::weakly_canonical(user_data_root, canonical_error);
+  std::string text = (canonical_error ? user_data_root : canonical).generic_string();
+#ifdef _WIN32
+  for (char& c : text) {
+    if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
+  }
+#endif
+  uint64_t hash = 1469598103934665603ull;
+  for (unsigned char c : text) {
+    hash ^= c;
+    hash *= 1099511628211ull;
+  }
+  const char* digits = "0123456789abcdef";
+  std::string key;
+  key.reserve(16);
+  for (int i = 15; i >= 0; --i) key.push_back(digits[(hash >> (i * 4)) & 0xF]);
+#ifdef _WIN32
+  std::wstring name = L"Local\\WWE13Recomp-";
+  for (char c : key) name.push_back(static_cast<wchar_t>(c));
+  HANDLE mutex = CreateMutexW(nullptr, FALSE, name.c_str());
+  if (mutex == nullptr) return false;
+  const bool running = GetLastError() == ERROR_ALREADY_EXISTS;
+  CloseHandle(mutex);
+  return running;
+#else
+  const char* runtime_dir = std::getenv("XDG_RUNTIME_DIR");
+  std::string dir = (runtime_dir != nullptr && runtime_dir[0] != '\0') ? runtime_dir : "/tmp";
+  while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
+  const std::string path = dir + "/wwe13-recomp-" + key + ".lock";
+  int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+  if (fd < 0) return false;
+  const bool running = flock(fd, LOCK_EX | LOCK_NB) != 0;
+  if (!running) flock(fd, LOCK_UN);
+  ::close(fd);
+  return running;
+#endif
+}
 
 struct ResolutionParameters {
   const char* output;
@@ -283,6 +330,7 @@ bool ProcessorSupportsGameBuild() {
 Result StartGame(const LaunchPlan& plan, double watch_seconds) {
   try {
     std::error_code error;
+    fs::path user_data_root;
     for (const std::string& argument : plan.arguments) {
       constexpr std::string_view log_prefix = "--log_file=";
       constexpr std::string_view user_prefix = "--user_data_root=";
@@ -291,13 +339,20 @@ Result StartGame(const LaunchPlan& plan, double watch_seconds) {
           return Result::Fail("The launcher could not prepare the game folders.");
         }
       } else if (argument.starts_with(user_prefix)) {
-        if (!internal::EnsureDirectory(internal::PathFromUtf8(argument.substr(user_prefix.size())))) {
+        user_data_root = internal::PathFromUtf8(argument.substr(user_prefix.size()));
+        if (!internal::EnsureDirectory(user_data_root)) {
           return Result::Fail("The launcher could not prepare the game folders.");
         }
       }
     }
     if (!fs::is_regular_file(plan.executable, error) || error) {
       return Result::Fail("The game program could not be found next to the launcher.");
+    }
+    // GitHub #6: never start a second game against the same user-data folder; it would fight the
+    // running one for the GPU (the first start-up can look frozen while shaders are prepared).
+    if (GameAlreadyRunning(user_data_root)) {
+      return Result::Fail(
+          "WWE '13 is already running. Close the other game window, then press Play again.");
     }
 #ifdef _WIN32
     if (!ProcessorSupportsGameBuild()) {
