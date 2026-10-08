@@ -338,6 +338,13 @@ void TestBugReport(const fs::path& root) {
     output.close();
     fs::last_write_time(log, fs::file_time_type::clock::now() - std::chrono::seconds(20 - index));
   }
+  // An older freeze-logger exit snapshot must still be included.
+  const fs::path snapshot = paths.logs_dir / "wwe13-exit-20261008-054030.txt";
+  {
+    std::ofstream output(snapshot);
+    output << "WWE 13 exit snapshot";
+  }
+  fs::last_write_time(snapshot, fs::file_time_type::clock::now() - std::chrono::seconds(60));
   Settings settings;
   settings.game_folder = paths.default_game_folder;
   assert(SaveSettings(paths, settings).ok);
@@ -347,18 +354,21 @@ void TestBugReport(const fs::path& root) {
   wwe13::launcher::internal::ZipReader zip;
   assert(zip.Open(report));
   bool newest_seen = false, old_seen = false, ini_seen = false, gpu_seen = false, system_seen = false;
+  bool snapshot_seen = false;
   for (size_t index = 0; index < zip.Count(); ++index) {
     mz_zip_archive_file_stat stat{};
     assert(zip.Stat(index, stat));
     const std::string name = stat.m_filename;
     if (name == "logs/game-3.log") newest_seen = true;
     if (name == "logs/game-0.log") old_seen = true;
+    if (name == "logs/wwe13-exit-20261008-054030.txt") snapshot_seen = true;
     if (name == "wwe13-enhanced.ini") ini_seen = true;
     if (name == "gpu-list.txt") gpu_seen = true;
     if (name == "system.txt") system_seen = true;
   }
-  assert(newest_seen && !old_seen && ini_seen && gpu_seen && system_seen);
-  std::cout << "PASS bug report ZIP includes newest three logs, INI, GPU list, and system summary\n";
+  assert(newest_seen && !old_seen && snapshot_seen && ini_seen && gpu_seen && system_seen);
+  std::cout << "PASS bug report ZIP includes newest three logs, an older freeze-logger exit snapshot, INI, GPU "
+               "list, and system summary\n";
 }
 
 void TestGpus() {

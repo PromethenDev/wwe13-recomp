@@ -67,7 +67,7 @@ for input in "$WIN_EXE" "$LINUX_EXE" \
              "$LAUNCHER2_WIN_EXE" "$LAUNCHER2_LINUX_EXE" \
              "$ROOT/launcher2/thirdparty/miniz/miniz.h" \
              "$ROOT/README.md" "$ROOT/DISCLAIMER.md" "$ROOT/LICENSE" \
-             "$ROOT/RELEASE-NOTES-v1.3.md" \
+             "$ROOT/RELEASE-NOTES-v1.4.md" \
              "$SDK_ROOT/LICENSE" "$SDK_FFMPEG/COPYING.LGPLv2.1" \
              "$SDK_ROOT/thirdparty/CMakeLists.txt"; do
   test -f "$input" || { printf 'Missing required package input: %s\n' "$input" >&2; exit 2; }
@@ -150,7 +150,17 @@ if start < 0:
 end = text.find("*/", start)
 open(sys.argv[2], "w", encoding="utf-8").write(text[start:end if end > 0 else None].strip() + "\n")
 PY
-cp "$ROOT/README.md" "$ROOT/DISCLAIMER.md" "$ROOT/LICENSE" "$ROOT/RELEASE-NOTES-v1.3.md" "$STAGE/"
+# picosha2 (MIT) backs the updater's SHA-256 verification; its licence text is at the top of the header.
+python3 - "$ROOT/launcher2/thirdparty/picosha2/picosha2.h" "$STAGE/licenses/launcher/picosha2-MIT.txt" <<'PY'
+import sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+start = text.find("The MIT License (MIT)")
+if start < 0:
+    raise SystemExit("picosha2 MIT statement not found")
+end = text.find("*/", start)
+open(sys.argv[2], "w", encoding="utf-8").write(text[start:end if end > 0 else None].strip() + "\n")
+PY
+cp "$ROOT/README.md" "$ROOT/DISCLAIMER.md" "$ROOT/LICENSE" "$ROOT/RELEASE-NOTES-v1.4.md" "$STAGE/"
 cp "$SDK_FFMPEG/COPYING.LGPLv2.1" "$STAGE/licenses/FFmpeg-LGPL-2.1.txt"
 
 # Preserve SDK and vendored dependency LICENSE/COPYING/NOTICE texts. Keep their

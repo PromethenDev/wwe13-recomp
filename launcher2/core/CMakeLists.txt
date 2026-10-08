@@ -55,11 +55,13 @@ file(GLOB WWE13_LAUNCHER_CORE_SOURCES CONFIGURE_DEPENDS
 add_library(wwe13_launcher_core STATIC ${WWE13_LAUNCHER_CORE_SOURCES})
 target_include_directories(wwe13_launcher_core
   PUBLIC "${CMAKE_CURRENT_LIST_DIR}"
-  PRIVATE "${WWE13_REXGLUE_THIRDPARTY}/decoders")
+  PRIVATE "${WWE13_REXGLUE_THIRDPARTY}/decoders"
+          "${WWE13_PROJECT_ROOT}/launcher2/thirdparty/picosha2")
 target_link_libraries(wwe13_launcher_core
   PUBLIC wwe13_launcher_volk wwe13_launcher_miniz)
 if(WIN32)
-  target_link_libraries(wwe13_launcher_core PRIVATE shell32)
+  # The auto-updater uses WinHTTP (a system DLL) for HTTPS; no extra dependency to ship.
+  target_link_libraries(wwe13_launcher_core PRIVATE shell32 winhttp)
 endif()
 
 if(MSVC)

@@ -62,6 +62,8 @@ struct Settings {
   bool auto_backup = true;          // back up saves before each launch, keep last 5
   bool stretch_to_fill = false;     // stretch the 16:9 picture over wider screens (21:9) instead of black bars
   bool sync_to_display = true;      // pace frames on the display's vblank (WWE13_HOST_VSYNC); off = steady timer
+  bool check_updates = true;        // look for a newer release when the launcher starts
+  std::string skipped_update_version;  // "Skip this version" choice ("" = none)
   bool explicit_choice = false;     // false = follow RecommendedSettings()
 };
 // Reads the existing wwe13-enhanced.ini (UTF-16LE with BOM written by the old launcher, or UTF-8) including
@@ -264,6 +266,10 @@ inline constexpr const char* kGameClosedEarlyMessage =
     "WWE '13 closed right after starting. Press \"Save a Bug Report (logs + settings)\" at the bottom "
     "of the launcher and attach the zip to your report on GitHub.";
 Result StartGame(const LaunchPlan& plan, double watch_seconds = 0.0);
+// True when a game process currently holds the single-instance lock for this user-data folder (the same
+// FNV-1a key and lock the game's src/single_instance.cpp uses). The launcher refuses Play and updates while
+// it is true.
+bool GameAlreadyRunning(const fs::path& user_data_root);
 
 // ---------------------------------------------------------------------------------------------- keyboard controls
 // The game's keyboard keys: keybind_* in wwe13.toml beside the game executable (read by the game at start).

@@ -12,6 +12,7 @@
 #include "launcher_core.h"
 #include "launcher_version.h"
 #include "native_keys.h"
+#include "update.h"
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -36,6 +37,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <exception>
 #include <iomanip>
@@ -115,6 +117,14 @@ struct DialogState {
   bool ready = false;
   bool failed = false;
   std::vector<std::string> paths;
+};
+
+// Result of the background "is there a newer version?" check.
+struct UpdateCheck {
+  std::mutex mutex;
+  bool running = false;
+  bool checked = false;
+  UpdateInfo info;
 };
 
 struct Fonts {
@@ -200,6 +210,16 @@ struct AppState {
   bool gamepad_connected = false;
   int startup_width = 1280;
   int startup_height = 760;
+
+  // Auto-updater (v1.4). The check runs on its own thread; the UI only reads the result.
+  UpdateCheck update;
+  std::thread update_thread;
+  bool update_hidden_this_session = false;  // "Not now"
+  bool update_job = false;                  // the running job is an update download/install
+  bool update_auto_attempted = false;       // the test-only auto-accept ran once
+  bool update_notes_open = false;
+  bool update_screenshot_mode = false;      // test-only capture sequence
+  size_t update_screenshot_index = 0;
 };
 
 float S(const AppState& app, float pixels) {
@@ -274,10 +294,28 @@ bool ResolutionHidden(Resolution resolution) {
 }
 
 fs::path LauncherExecutablePath() {
+  // Ask the OS for the real path: the packaged Windows launcher is "WWE13 Launcher.exe" while the build
+  // target and the Linux binary are "wwe13-launcher". Guessing the name broke relaunching after an update.
+#ifdef _WIN32
+  wchar_t buffer[4096];
+  const DWORD length = GetModuleFileNameW(nullptr, buffer, static_cast<DWORD>(std::size(buffer)));
+  if (length > 0 && length < std::size(buffer)) return fs::path(buffer);
+#else
+  std::error_code error;
+  fs::path self = fs::read_symlink("/proc/self/exe", error);
+  if (!error && !self.empty()) {
+    // After an in-place update the running inode has been unlinked, so /proc/self/exe reads
+    // "<path> (deleted)". The path still names the location and now holds the new binary.
+    const std::string text = self.string();
+    constexpr std::string_view deleted = " (deleted)";
+    if (text.ends_with(deleted)) self = fs::path(text.substr(0, text.size() - deleted.size()));
+    return self;
+  }
+#endif
   const char* base = SDL_GetBasePath();
   const fs::path directory = base ? Utf8Path(base) : fs::current_path();
 #ifdef _WIN32
-  return directory / "wwe13-launcher.exe";
+  return directory / "WWE13 Launcher.exe";
 #else
   return directory / "wwe13-launcher";
 #endif
@@ -296,6 +334,8 @@ Settings ActiveSettings(const AppState& app) {
   settings.auto_backup = app.settings.auto_backup;
   settings.stretch_to_fill = app.settings.stretch_to_fill;
   settings.sync_to_display = app.settings.sync_to_display;
+  settings.check_updates = app.settings.check_updates;
+  settings.skipped_update_version = app.settings.skipped_update_version;
   settings.explicit_choice = false;
   return settings;
 }
@@ -378,6 +418,12 @@ void BeginJob(AppState& app, std::string label, JobTask task) {
 }
 
 void RefreshFolderInstallables(AppState& app);
+void DrawProgress(AppState& app);           // defined with the Game files page; reused by the updater
+void DrawUpdateBanner(AppState& app);
+void DrawUpdateNotes(AppState& app);
+void StartUpdate(AppState& app);
+void StartUpdateCheck(AppState& app);
+void PollUpdateCheck(AppState& app);
 
 void PollJob(AppState& app) {
   std::function<void()> apply;
@@ -395,6 +441,7 @@ void PollJob(AppState& app) {
   if (!finished) return;
   if (app.job.thread.joinable()) app.job.thread.join();
   app.job.active.store(false);
+  app.update_job = false;
   if (!result.ok) {
     SetBanner(app, result.error.empty() ? "That action could not be completed." : result.error);
   } else {
@@ -420,6 +467,10 @@ void PerfLog(const char* format, ...) {
   va_start(args, format);
   std::vsnprintf(line, sizeof(line), format, args);
   va_end(args);
+  // The update check logs from its own thread; serialise so lines never interleave.
+  static std::mutex log_mutex;
+  std::lock_guard lock(log_mutex);
+  if (g_perf_log_lines >= kPerfLogMaxLines) return;
   std::fprintf(g_perf_log, "[%8.3f s] %s\n", SDL_GetTicksNS() / 1e9, line);
   std::fflush(g_perf_log);
   ++g_perf_log_lines;
@@ -629,6 +680,7 @@ void StartInitialization(AppState& app) {
     const std::vector<TitantronMovie> titantron_movies = ListTitantronMovies(game_folder);
     const std::vector<EntranceVideo> entrance_videos = ListEntranceVideos(paths);
     if (exe_dir_writable) EnsureKeyboardDefaults(paths);  // first start: write the modern default keys
+    if (exe_dir_writable) CleanupUpdateLeftovers(paths);  // remove *.old / *.part from a previous update
     const KeyboardControls controls = LoadKeyboardControls(paths);
     return JobOutcome{Result::Ok(), [&app, paths, settings, settings_save, reset_hidden_1080p,
                                       exe_dir_writable, controls, gpus, recommendation, game_files, songs,
@@ -648,6 +700,9 @@ void StartInitialization(AppState& app) {
                          app.controls = controls;
                          app.initialized = true;
                          RefreshFolderInstallables(app);
+                         if (app.settings.check_updates && (!app.screenshot_mode || app.update_screenshot_mode)) {
+                           StartUpdateCheck(app);
+                         }
                          if (!app.game_files.ready() && (!app.folder_installables.disc_images.empty() ||
                                                          !app.folder_installables.packages.empty())) {
                            app.tab = Tab::GameFiles;
@@ -1561,6 +1616,239 @@ DialogResult LauncherDialog(const AppState& app, bool& open, const char* id, con
   return result;
 }
 
+// ------------------------------------------------------------------------------------------- updater
+// The check runs on its own thread and stores its result under app.update.mutex. Nothing here blocks the
+// UI and nothing is shown when the check failed (offline, no curl, no newer release).
+UpdateInfo CurrentUpdateInfo(AppState& app) {
+  std::lock_guard lock(app.update.mutex);
+  return app.update.info;
+}
+
+bool UpdateOffered(AppState& app) {
+  if (!app.settings.check_updates) return false;
+  if (app.update_hidden_this_session) return false;
+  const UpdateInfo info = CurrentUpdateInfo(app);
+  if (!info.available) return false;
+  return info.version != app.settings.skipped_update_version;
+}
+
+void StartUpdateCheck(AppState& app) {
+  if (app.update.running || app.update.checked) return;
+  if (app.update_thread.joinable()) app.update_thread.join();
+  {
+    std::lock_guard lock(app.update.mutex);
+    app.update.running = true;
+  }
+  PerfLog("update check: started");
+  app.update_thread = std::thread([&app]() {
+    UpdateInfo info = CheckLatestUpdate(WWE13_LAUNCHER_VERSION, 5.0);
+    std::lock_guard lock(app.update.mutex);
+    app.update.info = std::move(info);
+    app.update.checked = true;
+    app.update.running = false;
+    PerfLog("update check: available=%d version=%s", app.update.info.available ? 1 : 0,
+            app.update.info.version.c_str());
+  });
+}
+
+void StartUpdate(AppState& app) {
+  if (app.job.active.load()) return;
+  // Never replace program files while a game is running: it holds the same files open.
+  if (GameAlreadyRunning(app.paths.userdata_dir)) {
+    PerfLog("update refused: game is running");
+    SetBanner(app, "WWE '13 is running. Close the game window, then try again.");
+    return;
+  }
+  const UpdateInfo info = CurrentUpdateInfo(app);
+  if (!info.available) return;
+  PerfLog("update start: version=%s size=%llu", info.version.c_str(),
+          static_cast<unsigned long long>(info.size));
+  const Paths paths = app.paths;
+  const std::string old_version = WWE13_LAUNCHER_VERSION;
+  app.update_job = true;
+  app.update_hidden_this_session = false;
+  BeginJob(app, "Getting the update ready…", [&app, paths, info, old_version](const ProgressFn& progress,
+                                                                             CancelFlag& cancel) {
+    fs::path downloaded;
+    const Result download = DownloadUpdate(paths, info, progress, cancel, &downloaded);
+    if (!download.ok) {
+      PerfLog("update download failed: %s", download.error.c_str());
+      if (download.error.empty()) {  // cancelled while downloading
+        return JobOutcome{Result::Ok(), [&app] { SetBanner(app, "Update cancelled. Nothing was changed."); }};
+      }
+      return JobOutcome{download, {}};
+    }
+    PerfLog("update downloaded: %s", PathUtf8(downloaded).c_str());
+    const Result applied = ApplyUpdate(paths, downloaded, info, old_version, progress, cancel);
+    if (!applied.ok) {
+      PerfLog("update apply failed: %s", applied.error.c_str());
+      return JobOutcome{applied, {}};
+    }
+    PerfLog("update applied: version=%s", info.version.c_str());
+    std::error_code error;
+    fs::remove(downloaded, error);  // the new files are in place; keep the player's disk tidy
+    const std::string version = info.version;
+    return JobOutcome{Result::Ok(), [&app, version] {
+                        SetBanner(app, "WWE '13 Recomp " + version + " installed. The launcher is restarting…",
+                                  true);
+                        const fs::path executable = LauncherExecutablePath();
+                        const Result relaunch = RelaunchLauncher(executable);
+                        PerfLog("update relaunch ok=%d path=%s error=%s", relaunch.ok ? 1 : 0,
+                                PathUtf8(executable).c_str(), relaunch.error.c_str());
+                        if (relaunch.ok) {
+                          app.running = false;
+                        } else {
+                          SetBanner(app, relaunch.error);
+                        }
+                      }};
+  });
+}
+
+void PollUpdateCheck(AppState& app) {
+  bool checked = false;
+  UpdateInfo info;
+  {
+    std::lock_guard lock(app.update.mutex);
+    checked = app.update.checked;
+    info = app.update.info;
+  }
+  if (!checked || !info.available) return;
+  if (app.settings.skipped_update_version == info.version) return;
+  // Tests only: accept automatically so the whole download/apply/restart flow can run unattended.
+  if (const char* value = std::getenv("WWE13_UPDATE_AUTO_ACCEPT"); value && std::string_view(value) == "1" &&
+      !app.update_auto_attempted && app.initialized && !app.job.active.load()) {
+    app.update_auto_attempted = true;
+    PerfLog("update auto-accept: starting");
+    StartUpdate(app);
+  }
+}
+
+void DrawUpdateBanner(AppState& app) {
+  if (!UpdateOffered(app) || app.update_job) return;
+  const UpdateInfo info = CurrentUpdateInfo(app);
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.11f, 0.13f, 0.23f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.26f, 0.33f, 0.56f, 1.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(app, 10.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, S(app, 1.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, S(app, 16.0f, 10.0f));
+  ImGui::BeginChild("update-banner", ImVec2(0.0f, S(app, 104.0f)), true,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::PushFont(app.fonts.barlow_semibold);
+  ImGui::TextUnformatted(("Version " + info.version + " is available").c_str());
+  ImGui::PopFont();
+  ImGui::PushFont(app.fonts.barlow_small);
+  ImGui::PushStyleColor(ImGuiCol_Text, kSecondary);
+  ImGui::TextWrapped("You have %s. Updating replaces the program files only - your saves, game files, "
+                     "settings and music stay exactly where they are.", WWE13_LAUNCHER_VERSION);
+  ImGui::PopStyleColor();
+  ImGui::PopFont();
+  ImGui::Spacing();
+  const ImVec2 button_size(S(app, 116.0f), S(app, 30.0f));
+  if (ImGui::Button("What's new", button_size)) app.update_notes_open = true;
+  ImGui::SameLine();
+  if (AccentButton(app, "Update", button_size)) StartUpdate(app);
+  ImGui::SameLine();
+  if (ImGui::Button("Not now", button_size)) app.update_hidden_this_session = true;
+  ImGui::SameLine();
+  if (ImGui::Button("Skip this version", ImVec2(S(app, 150.0f), S(app, 30.0f)))) {
+    app.settings.skipped_update_version = info.version;
+    SaveSettings(app);
+  }
+  ImGui::EndChild();
+  ImGui::PopStyleVar(3);
+  ImGui::PopStyleColor(2);
+  ImGui::Spacing();
+}
+
+// Player-facing release notes: strip markdown heading marks, turn "- item" into a bullet and keep blank
+// lines, so a GitHub release body reads like a native update note rather than raw markdown.
+std::string FormatReleaseNotes(const std::string& notes) {
+  std::string output;
+  size_t offset = 0;
+  while (offset <= notes.size()) {
+    const size_t end = notes.find('\n', offset);
+    std::string line = notes.substr(offset, end == std::string::npos ? notes.size() - offset : end - offset);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    const size_t first = line.find_first_not_of(" \t");
+    const std::string trimmed = first == std::string::npos ? std::string() : line.substr(first);
+    if (!trimmed.empty() && trimmed.front() == '#') {
+      size_t hashes = 0;
+      while (hashes < trimmed.size() && trimmed[hashes] == '#') ++hashes;
+      const std::string heading = trimmed.substr(hashes);
+      const size_t heading_first = heading.find_first_not_of(" \t");
+      output += (heading_first == std::string::npos ? std::string() : heading.substr(heading_first)) + "\n";
+    } else if (trimmed.size() >= 2 &&
+               (trimmed.front() == '-' || trimmed.front() == '*' || trimmed.front() == '+') &&
+               trimmed[1] == ' ') {
+      output += "\xE2\x80\xA2  " + trimmed.substr(2) + "\n";
+    } else {
+      output += line + "\n";
+    }
+    if (end == std::string::npos) break;
+    offset = end + 1;
+  }
+  return output;
+}
+
+void DrawUpdateNotes(AppState& app) {
+  if (!app.update_notes_open) return;
+  const UpdateInfo info = CurrentUpdateInfo(app);
+  const float width = S(app, 640.0f);
+  ImGui::OpenPopup("update-whats-new");
+  ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, FLT_MAX));
+  ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::PushStyleColor(ImGuiCol_PopupBg, kPanel);
+  ImGui::PushStyleColor(ImGuiCol_Border, kBorder);
+  ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, S(app, 14.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, S(app, 1.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, S(app, 26.0f, 22.0f));
+  if (ImGui::BeginPopupModal("update-whats-new", nullptr,
+                             ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                                 ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::PushFont(app.fonts.oswald_semibold);
+    ImGui::PushStyleColor(ImGuiCol_Text, kText);
+    ImGui::TextUnformatted(("What's new in " + info.version).c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, kWindow);
+    ImGui::PushStyleColor(ImGuiCol_Border, kBorder);
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(app, 8.0f));
+    if (ImGui::BeginChild("update-notes", ImVec2(0.0f, S(app, 320.0f)), true)) {
+      ImGui::PushFont(app.fonts.barlow_small);
+      ImGui::PushStyleColor(ImGuiCol_Text, kSecondary);
+      const std::string formatted =
+          FormatReleaseNotes(info.notes.empty() ? "No release notes were provided." : info.notes);
+      size_t offset = 0;
+      while (offset <= formatted.size()) {
+        const size_t end = formatted.find('\n', offset);
+        const std::string line =
+            formatted.substr(offset, end == std::string::npos ? formatted.size() - offset : end - offset);
+        if (line.empty()) ImGui::Spacing();
+        else ImGui::TextWrapped("%s", line.c_str());
+        if (end == std::string::npos) break;
+        offset = end + 1;
+      }
+      ImGui::PopStyleColor();
+      ImGui::PopFont();
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
+    ImGui::Dummy(ImVec2(0.0f, S(app, 14.0f)));
+    const float buttons_width = S(app, 120.0f);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - buttons_width);
+    if (AccentButton(app, "Close", ImVec2(buttons_width, S(app, 38.0f)))) {
+      app.update_notes_open = false;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::PopStyleVar(3);
+  ImGui::PopStyleColor(2);
+}
+
 void DrawPlay(AppState& app) {
   const Settings current = ActiveSettings(app);
   // GitHub #8: with no Vulkan device the game cannot start, so say so on this page instead of offering
@@ -1599,6 +1887,8 @@ void DrawPlay(AppState& app) {
   ImGui::PopStyleColor(2);
 
   ImGui::Spacing();
+  DrawUpdateBanner(app);
+  if (app.update_job) DrawProgress(app);
   const float row_width = ImGui::GetContentRegionAvail().x;
   const float row_gap = ImGui::GetStyle().ItemSpacing.x;
   const float pill_width = std::min(S(app, 150.0f), (row_width - S(app, 124.0f) - 4.0f * row_gap) / 4.0f);
@@ -1695,6 +1985,8 @@ void DrawSettings(AppState& app) {
     const bool auto_backup = app.settings.auto_backup;
     const bool stretch_to_fill = app.settings.stretch_to_fill;
     const bool sync_to_display = app.settings.sync_to_display;
+    const bool check_updates = app.settings.check_updates;
+    const std::string skipped_update_version = app.settings.skipped_update_version;
     app.settings = app.recommendation.settings;
     app.settings.gpu_id = selected_gpu_id;
     app.settings.game_folder = game_folder;
@@ -1702,6 +1994,8 @@ void DrawSettings(AppState& app) {
     app.settings.auto_backup = auto_backup;
     app.settings.stretch_to_fill = stretch_to_fill;
     app.settings.sync_to_display = sync_to_display;
+    app.settings.check_updates = check_updates;
+    app.settings.skipped_update_version = skipped_update_version;
     app.settings.explicit_choice = false;
     SaveSettings(app);
   }
@@ -1864,6 +2158,30 @@ void DrawSettings(AppState& app) {
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip("Windows only. Turn off if fullscreen stutters on a high refresh rate or "
                       "FreeSync / G-SYNC monitor.");
+  }
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor(3);
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+
+  // Updates are a personal preference like auto backup, so they never switch off Recommended.
+  ImGui::Spacing();
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, kRaised);
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(app, 10.0f));
+  ImGui::BeginChild("settings-updates-row", ImVec2(0, S(app, compact ? 44.0f : 52.0f)), false,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::SetCursorPos(S(app, 14, compact ? 10.0f : 14.0f));
+  ImGui::PushStyleColor(ImGuiCol_FrameBg, kWindow);
+  ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, kPanel);
+  ImGui::PushStyleColor(ImGuiCol_Border, kMuted);
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, S(app, 1.0f));
+  if (ImGui::Checkbox("Check for updates when the launcher starts", &app.settings.check_updates)) {
+    SaveSettings(app);
+    if (app.settings.check_updates) StartUpdateCheck(app);
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("The launcher asks GitHub for the newest version. It sends nothing about you or your PC.");
   }
   ImGui::PopStyleVar();
   ImGui::PopStyleColor(3);
@@ -3175,6 +3493,7 @@ void DrawMain(AppState& app) {
   ImGui::PopFont();
   ImGui::Spacing();
   DrawBanner(app);
+  DrawUpdateNotes(app);
   const float footer_space = ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - S(app, 52.0f);
   // Pages scroll when their content is taller than the window (e.g. Game files with a banner and found folders on
   // a small or scaled-down window); the scrollbar only appears when needed.
@@ -3383,6 +3702,68 @@ bool CaptureContentState(AppState& app) {
   return false;
 }
 
+// Test-only: capture the four updater states (available banner, release notes, download progress, done).
+// Update info comes from WWE13_TEST_UPDATE_JSON (a fixture file) or from the local test server named by
+// WWE13_UPDATE_API_URL. Returns false once every state has been captured.
+bool CaptureUpdateState(AppState& app) {
+  if (!app.update.checked) {
+    UpdateInfo info;
+    if (const char* fixture = std::getenv("WWE13_TEST_UPDATE_JSON"); fixture && *fixture) {
+      std::ifstream input(Utf8Path(fixture), std::ios::binary);
+      const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+      if (auto parsed = ParseLatestReleaseJson(text, WWE13_LAUNCHER_VERSION)) info = *parsed;
+    } else {
+      info = CheckLatestUpdate(WWE13_LAUNCHER_VERSION, 10.0);
+    }
+    std::lock_guard lock(app.update.mutex);
+    app.update.info = std::move(info);
+    app.update.checked = true;
+  }
+  {
+    std::lock_guard lock(app.update.mutex);
+    if (!app.update.info.available) {  // a fixture without a matching version still captures the UI
+      app.update.info.available = true;
+      if (app.update.info.version.empty()) app.update.info.version = "1.4.0";
+      if (app.update.info.notes.empty()) {
+        app.update.info.notes = "- Improved stability.\n- Smaller download.\n- Updates now install in place.";
+      }
+    }
+  }
+  app.tab = Tab::Play;
+  switch (app.update_screenshot_index++) {
+    case 0:
+      SaveScreenshotFrame(app, "update-available.png");
+      return true;
+    case 1:
+      app.update_notes_open = true;
+      SaveScreenshotFrame(app, "update-whats-new.png");
+      app.update_notes_open = false;
+      return true;
+    case 2: {
+      app.update_job = true;
+      app.job.active.store(true);
+      {
+        std::lock_guard lock(app.job.mutex);
+        app.job.done = 68ull * 1024u * 1024u;
+        app.job.total = 128ull * 1024u * 1024u;
+        app.job.label = "Downloading update…";
+        app.job.started = std::chrono::steady_clock::now() - std::chrono::seconds(3);
+      }
+      SaveScreenshotFrame(app, "update-progress.png");
+      app.job.active.store(false);
+      app.update_job = false;
+      return true;
+    }
+    case 3:
+      app.update_hidden_this_session = true;
+      SetBanner(app, "WWE '13 Recomp 1.4.0 installed. The launcher is restarting…", true);
+      SaveScreenshotFrame(app, "update-done.png");
+      return true;
+    default:
+      return false;
+  }
+}
+
 void LoadFonts(AppState& app) {
   ImGuiIO& io = ImGui::GetIO();
   float display_scale = SDL_GetWindowDisplayScale(app.window);
@@ -3482,6 +3863,12 @@ bool Initialize(AppState& app, int argc, char** argv) {
     if (argument == "--screenshot-content") {
       app.screenshot_mode = true;
       app.screenshot_content_mode = true;
+      if (i + 1 < argc && argv[i + 1][0] != '-') app.screenshot_dir = Utf8Path(argv[++i]);
+      else app.screenshot_dir = fs::path("out/l1/ui");
+    }
+    if (argument == "--screenshot-update") {
+      app.screenshot_mode = true;
+      app.update_screenshot_mode = true;
       if (i + 1 < argc && argv[i + 1][0] != '-') app.screenshot_dir = Utf8Path(argv[++i]);
       else app.screenshot_dir = fs::path("out/l1/ui");
     }
@@ -3645,6 +4032,7 @@ void HandleEvent(AppState& app, const SDL_Event& event) {
 void Shutdown(AppState& app) {
   app.job.cancel.store(true);
   if (app.job.thread.joinable()) app.job.thread.join();
+  if (app.update_thread.joinable()) app.update_thread.join();
   if (app.imgui_renderer_ready) ImGui_ImplSDLRenderer3_Shutdown();
   if (app.imgui_platform_ready) ImGui_ImplSDL3_Shutdown();
   if (ImGui::GetCurrentContext()) ImGui::DestroyContext();
@@ -3707,6 +4095,7 @@ int main(int argc, char** argv) {
     const Uint64 work_start = SDL_GetTicksNS();
     ++quiet_frames;
     PollJob(app);
+    PollUpdateCheck(app);
     ConsumeDialog(app);
     if (!app.test_drop_files.empty() && app.initialized && !app.job.active.load()) {
       app.tab = app.test_drop_tab;
@@ -3721,7 +4110,12 @@ int main(int argc, char** argv) {
     }
     ProcessDrops(app);
     if (app.screenshot_mode && app.initialized && !app.job.active.load()) {
-      if (app.screenshot_content_mode) {
+      if (app.update_screenshot_mode) {
+        if (!CaptureUpdateState(app)) {
+          app.running = false;
+          break;
+        }
+      } else if (app.screenshot_content_mode) {
         if (!CaptureContentState(app)) {
           app.running = false;
           break;

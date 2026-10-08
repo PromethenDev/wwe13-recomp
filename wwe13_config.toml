@@ -2,4 +2,12 @@ project_name = "wwe13"
 file_path = "game/default.xex"
 out_directory_path = "generated"
 
+# The CRT's setjmp / longjmp (jmp_buf in r3). Recompiled as plain code, setjmp
+# was truncated after its first 5 instructions and returned the jmp_buf address,
+# so every libjpeg decode took its error path and destroyed a decoder that was
+# never created (lr=0x82BD2A24: GitHub #12, #17, #18, #23). The codegen replaces
+# calls to them, as in the SVR 2011 and Unleashed configs.
+setjmp_address = 0x83193DB0
+longjmp_address = 0x83193A90
+
 includes = ["config/functions.toml", "config/hooks.toml"]

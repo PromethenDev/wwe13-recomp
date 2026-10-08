@@ -20,6 +20,7 @@
 #endif
 
 #include <rex/cvar.h>
+#include <rex/diagnostics/freeze_logger.h>
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 #include <rex/ui/keybinds.h>
@@ -123,6 +124,10 @@ class Wwe13App : public rex::ReXApp {
   }
 
   void OnPostSetup() override {
+    // Always-on freeze logger (GitHub #21/#25): 1 Hz watchdog + lock-free kernel
+    // sync-event ring; writes a report into the logs folder when the game stops
+    // making progress. Default on; WWE13_FREEZE_LOG=0 disables it.
+    rex::diagnostics::freeze_logger::Start();
     if (REXCVAR_GET(debug_ui)) {
       wwe13::StartThreadProfilerFromEnv();
     }

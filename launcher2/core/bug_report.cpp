@@ -73,9 +73,23 @@ Result SaveBugReport(const Paths& paths, fs::path* created_zip) {
       return internal::PathToUtf8(left.path().filename()) > internal::PathToUtf8(right.path().filename());
     });
 
+    // The newest three files, plus the newest two freeze/exit reports from the
+    // game's freeze logger (GitHub #21/#25) when they are older than that: a
+    // player who restarts the game after a freeze would otherwise push the
+    // report out of the newest three.
+    std::vector<size_t> chosen;
+    for (size_t i = 0; i < std::min<size_t>(3, logs.size()); ++i) chosen.push_back(i);
+    size_t reports = 0;
+    for (size_t i = chosen.size(); i < logs.size() && reports < 2; ++i) {
+      const std::string name = internal::PathToUtf8(logs[i].path().filename());
+      if (name.rfind("wwe13-exit-", 0) == 0 || name.rfind("wwe13-freeze-", 0) == 0) {
+        chosen.push_back(i);
+        ++reports;
+      }
+    }
+
     std::vector<internal::ZipEntry> entries;
-    const size_t selected = std::min<size_t>(3, logs.size());
-    for (size_t i = 0; i < selected; ++i) {
+    for (const size_t i : chosen) {
       internal::ZipEntry entry;
       entry.name = "logs/" + internal::PathToUtf8(logs[i].path().filename());
       if (!internal::ReadBinaryFile(logs[i].path(), entry.bytes)) {

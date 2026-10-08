@@ -23,7 +23,7 @@ You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game fil
 
 ## Install and play
 
-1. Download `WWE13-Recomp-v1.3.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
+1. Download `WWE13-Recomp-v1.4.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
 2. Start **`WWE13 Launcher.exe`** (Linux: `Linux-x86_64/wwe13-launcher`).
 3. In **Game files**, do one of the following:
    - put your game folder in the `WWE 13` folder beside the launcher, or
@@ -48,6 +48,26 @@ WWE13-Recomp-x64/
 ├── userdata/                   # saves, DLC and settings (created on first run)
 └── logs/                       # game logs (created on first run)
 ```
+
+## Updating
+
+The launcher can keep your copy up to date by itself. When it opens it quietly checks GitHub for a newer
+release; if one exists, the Play page shows a **Version X is available** banner with **What's new**,
+**Update**, **Not now** and **Skip this version**. Nothing is downloaded or changed until you press
+**Update**.
+
+Updating replaces **only the program files** (the game, the launcher, the shared libraries, the read me and
+the licence files). Everything of yours stays exactly where it is: your `userdata/` saves and DLC, your
+`WWE 13/` game files, your `wwe13-enhanced.ini` settings, your `wwe13.toml` controls, your `music/`, your
+`logs/` and your `backups/`. Existing shader-cache files are kept; only missing ones are added. Before
+touching anything the launcher copies the current program files to `backups/update-<version>/`, so a failed
+install is restored automatically. The download is checked against the release's SHA-256 before it is used,
+and a damaged download changes nothing.
+
+The check contacts `api.github.com` only and sends nothing about you or your PC. To turn it off, untick
+**Check for updates when the launcher starts** in the launcher's Settings. You can also close the banner
+with **Not now** (until the launcher restarts) or **Skip this version** (remembered). If the launcher
+cannot reach GitHub, it says nothing and starts normally.
 
 ## Launcher settings
 

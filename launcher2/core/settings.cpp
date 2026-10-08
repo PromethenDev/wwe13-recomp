@@ -216,7 +216,8 @@ std::string BuildIni(const Paths& paths, const Settings& settings) {
   const std::vector<std::string> old_lines = SplitLines(old_text);
   const std::set<std::string> replaced = {"schema", "anti_aliasing", "resolution", "frame_rate",
                                           "display", "gpu", "game_folder", "auto_start",
-                                          "auto_backup", "stretch_to_fill", "sync_to_display"};
+                                          "auto_backup", "stretch_to_fill", "sync_to_display",
+                                          "check_updates", "skipped_update_version"};
   std::vector<std::string> unknown_settings;
   std::vector<std::string> outside_settings;
   std::string active_section;
@@ -254,7 +255,9 @@ std::string BuildIni(const Paths& paths, const Settings& settings) {
          << "\r\nauto_start=" << (settings.auto_start ? "1" : "0")
          << "\r\nauto_backup=" << (settings.auto_backup ? "1" : "0")
          << "\r\nstretch_to_fill=" << (settings.stretch_to_fill ? "1" : "0")
-         << "\r\nsync_to_display=" << (settings.sync_to_display ? "1" : "0") << "\r\n";
+         << "\r\nsync_to_display=" << (settings.sync_to_display ? "1" : "0")
+         << "\r\ncheck_updates=" << (settings.check_updates ? "1" : "0")
+         << "\r\nskipped_update_version=" << settings.skipped_update_version << "\r\n";
   for (const auto& line : unknown_settings) output << line << "\r\n";
   if (!outside_settings.empty()) {
     output << "\r\n";
@@ -347,6 +350,11 @@ Settings LoadSettingsImpl(const Paths& paths) {
   if (!sync_to_display.empty()) {
     settings.sync_to_display = sync_to_display == "1" || EqualsAsciiInsensitive(sync_to_display, "true");
   }
+  const std::string check_updates = IniValue(entries, "check_updates");
+  if (!check_updates.empty()) {
+    settings.check_updates = check_updates == "1" || EqualsAsciiInsensitive(check_updates, "true");
+  }
+  settings.skipped_update_version = Trim(IniValue(entries, "skipped_update_version"));
   settings.explicit_choice = resolution_explicit || frame_explicit;
   return settings;
 }
