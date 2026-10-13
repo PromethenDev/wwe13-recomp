@@ -478,6 +478,71 @@ void TestKeyboardControls(const fs::path& root) {
                "edit, duplicates, unsupported keys, damaged file\n";
 }
 
+void TestGameLanguage(const fs::path& root) {
+  const fs::path directory = root / "language";
+  fs::create_directories(directory);
+  const Paths paths = MakePaths(directory);
+  const fs::path toml = directory / "wwe13.toml";
+
+  // Absent file: English, nothing present. Choosing English with no line writes nothing at all.
+  assert(!fs::exists(toml));
+  GameLanguage language = LoadGameLanguage(paths);
+  assert(language.id == 1 && !language.present);
+  assert(SaveGameLanguage(paths, 1).ok && !fs::exists(toml));
+
+  // Absent file + German: the file is created with just the one line.
+  assert(SaveGameLanguage(paths, 3).ok && ReadAll(toml) == "user_language = 3\n");
+  language = LoadGameLanguage(paths);
+  assert(language.id == 3 && language.present);
+
+  // Existing file without the line (CRLF, keybinds, a table): inserted before the first [table], rest byte-identical.
+  const std::string other = "# my settings\r\nkeybind_a = \"L\" # A\r\nresolution_scale = 2\r\n\r\n[GPU]\r\nvsync = true\r\n";
+  WriteAll(toml, other);
+  assert(!LoadGameLanguage(paths).present);
+  assert(SaveGameLanguage(paths, 4).ok);
+  assert(ReadAll(toml) ==
+         "# my settings\r\nkeybind_a = \"L\" # A\r\nresolution_scale = 2\r\n\r\nuser_language = 4\r\n[GPU]\r\nvsync = true\r\n");
+  assert(LoadGameLanguage(paths).id == 4);
+  // English with no existing line leaves the file untouched.
+  WriteAll(toml, other);
+  assert(SaveGameLanguage(paths, 1).ok && ReadAll(toml) == other);
+
+  // File with no table and no trailing newline: a line break is added first.
+  WriteAll(toml, "keybind_b = \"K\"");
+  assert(SaveGameLanguage(paths, 5).ok && ReadAll(toml) == "keybind_b = \"K\"\nuser_language = 5\n");
+
+  // Existing line: replaced in place (spacing and comment kept), keybinds and other lines untouched; English writes 1.
+  WriteAll(toml, "keybind_a = \"L\"\nuser_language   =   3   # menus\nkeybind_b = \"K\"\n[GPU]\nuser_language = 9\n");
+  assert(LoadGameLanguage(paths).id == 3);
+  assert(SaveGameLanguage(paths, 6).ok);
+  assert(ReadAll(toml) ==
+         "keybind_a = \"L\"\nuser_language   =   6   # menus\nkeybind_b = \"K\"\n[GPU]\nuser_language = 9\n");
+  assert(SaveGameLanguage(paths, 1).ok && LoadGameLanguage(paths).id == 1 && LoadGameLanguage(paths).present);
+  assert(ReadAll(toml).find("user_language   =   1   # menus\n") != std::string::npos);
+
+  // Unknown values (2, 7) are reported as they are and never rewritten unless the caller saves a new choice.
+  WriteAll(toml, "user_language = 7\nkeybind_a = \"L\"\n");
+  language = LoadGameLanguage(paths);
+  assert(language.id == 7 && language.present);
+  assert(LoadKeyboardControls(paths).keys[0] == "L");
+  WriteAll(toml, "user_language = 2\n");
+  assert(LoadGameLanguage(paths).id == 2);
+  assert(SaveGameLanguage(paths, 2).ok && ReadAll(toml) == "user_language = 2\n");
+
+  // Unreadable value (quoted text): treated as absent/English; the line is only changed when the user picks.
+  WriteAll(toml, "user_language = \"german\"\n");
+  language = LoadGameLanguage(paths);
+  assert(language.id == 1 && !language.present);
+  assert(SaveGameLanguage(paths, 3).ok && ReadAll(toml) == "user_language = 3\n");
+
+  // Saving the language never disturbs keybinds, and saving keybinds never disturbs the language.
+  WriteAll(toml, "user_language = 4\n");
+  assert(EnsureKeyboardDefaults(paths).ok);
+  assert(LoadGameLanguage(paths).id == 4 && LoadKeyboardControls(paths).keys[0] == "L");
+  assert(SaveGameLanguage(paths, 5).ok && LoadKeyboardControls(paths).keys[1] == "K" && LoadGameLanguage(paths).id == 5);
+  std::cout << "PASS game language: absent, insert, replace in place, byte preservation, unknown values, keybinds\n";
+}
+
 int main() {
   const fs::path output = fs::path(WWE13_LAUNCHER_TESTDATA).parent_path() / "core";
   std::error_code error;
@@ -497,6 +562,7 @@ int main() {
   TestBugReport(root);
   TestGpus();
   TestKeyboardControls(root);
+  TestGameLanguage(root);
   std::cout << "All core tests passed.\n";
   return 0;
 }

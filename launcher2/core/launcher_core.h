@@ -259,13 +259,16 @@ struct LaunchPlan {
   fs::path working_directory;
 };
 LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings& settings, const std::vector<GpuInfo>& gpus);
-// Detached start. With watch_seconds > 0 it also waits that long and fails with kGameClosedEarlyMessage
-// when the game process has already exited (e.g. an antivirus block, a missing file or a driver without
-// Vulkan), so the launcher can stay open and tell the player instead of silently disappearing.
+// Detached start. process_started, when supplied, is set true immediately after the OS successfully
+// creates the child, before the optional watch. With watch_seconds > 0 it also watches for that long
+// and fails with kGameClosedEarlyMessage if the game exits unsuccessfully (nonzero status or a signal),
+// so the launcher can stay open and tell the player instead of silently disappearing. A normal exit
+// (status zero) is OK.
 inline constexpr const char* kGameClosedEarlyMessage =
-    "WWE '13 closed right after starting. Press \"Save a Bug Report (logs + settings)\" at the bottom "
-    "of the launcher and attach the zip to your report on GitHub.";
-Result StartGame(const LaunchPlan& plan, double watch_seconds = 0.0);
+    "The game closed unexpectedly while starting. Please use 'Save a Bug Report' and attach it to your "
+    "GitHub report. On Intel graphics, installing the newest Intel graphics driver may help.";
+Result StartGame(const LaunchPlan& plan, double watch_seconds = 0.0,
+                 std::atomic<bool>* process_started = nullptr);
 // True when a game process currently holds the single-instance lock for this user-data folder (the same
 // FNV-1a key and lock the game's src/single_instance.cpp uses). The launcher refuses Play and updates while
 // it is true.
@@ -294,6 +297,18 @@ std::vector<bool> DuplicateKeyBindings(const KeyboardControls& controls);  // tr
 Result EnsureKeyboardDefaults(const Paths& paths);
 // Rewrites only the keybind_* lines (other settings in the file are kept byte for byte); refuses duplicates.
 Result SaveKeyboardControls(const Paths& paths, const KeyboardControls& controls);
+
+// ---------------------------------------------------------------------------------------------- game language
+// The game's menu/text language: `user_language = N` in the root table of the same wwe13.toml (the SDK's XLanguage
+// ids: 1 English, 3 German, 4 French, 5 Spanish, 6 Italian). Absent line = English (the game's own default).
+struct GameLanguage {
+  int id = 1;            // 1 when absent or unreadable
+  bool present = false;  // a readable `user_language = N` line exists
+};
+GameLanguage LoadGameLanguage(const Paths& paths);  // never fails: unreadable file -> English, not present
+// Replaces the user_language line in place (key spacing and comment kept) or inserts it before the first [table];
+// every other byte of the file is kept. English with no existing line writes nothing (absent already means English).
+Result SaveGameLanguage(const Paths& paths, int language_id);
 
 // ---------------------------------------------------------------------------------------------- bug report
 // Zips the newest game logs, wwe13-enhanced.ini, GPU list and a short system summary into exe_dir.

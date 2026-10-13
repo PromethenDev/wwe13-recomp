@@ -128,6 +128,14 @@ class Wwe13App : public rex::ReXApp {
     // sync-event ring; writes a report into the logs folder when the game stops
     // making progress. Default on; WWE13_FREEZE_LOG=0 disables it.
     rex::diagnostics::freeze_logger::Start();
+#ifdef _WIN32
+    // GitHub #44: keep the PC (and display) awake while the game runs; with a controller there is no keyboard or
+    // mouse input, so Windows' idle timer would otherwise sleep the PC mid-match. Cleared again in OnShutdown.
+    // The Continuous flag is tied to this (UI) thread, which lives for the whole session.
+    if (SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED) != 0) {
+      REXLOG_INFO("[wwe13] keep-awake on");
+    }
+#endif
     if (REXCVAR_GET(debug_ui)) {
       wwe13::StartThreadProfilerFromEnv();
     }
@@ -219,6 +227,9 @@ class Wwe13App : public rex::ReXApp {
   }
 
   void OnShutdown() override {
+#ifdef _WIN32
+    SetThreadExecutionState(ES_CONTINUOUS);
+#endif
     wwe13::StopThreadProfiler();
     rex::ui::UnregisterBind("bind_toggle_fullscreen");
     perf_overlay_.reset();

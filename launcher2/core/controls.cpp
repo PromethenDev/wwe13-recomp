@@ -191,6 +191,48 @@ void ForEachLine(const std::string& text, Visit&& visit) {
   }
 }
 
+// Finds the root-table `user_language = N` line. Returns false for a line that is not that key. `value_begin/end` span the
+// value text (quotes included when quoted) so a replace keeps the key, spacing and trailing comment byte for byte.
+struct LanguageLine {
+  bool match = false;
+  size_t value_begin = 0;
+  size_t value_end = 0;
+  std::string value;
+};
+
+LanguageLine ParseLanguageLine(std::string_view line) {
+  LanguageLine result;
+  constexpr std::string_view kKey = "user_language";
+  size_t cursor = SkipBom(line);
+  while (cursor < line.size() && IsTomlSpace(line[cursor])) ++cursor;
+  if (line.substr(cursor, kKey.size()) != kKey) return result;
+  cursor += kKey.size();
+  while (cursor < line.size() && IsTomlSpace(line[cursor])) ++cursor;
+  if (cursor == line.size() || line[cursor] != '=') return result;
+  ++cursor;
+  while (cursor < line.size() && IsTomlSpace(line[cursor])) ++cursor;
+  result.match = true;
+  result.value_begin = cursor;
+  size_t end = line.find('#', cursor);
+  if (end == std::string_view::npos) end = line.size();
+  while (end > cursor && IsTomlSpace(line[end - 1])) --end;
+  result.value_end = end;
+  result.value.assign(line.substr(cursor, end - cursor));
+  return result;
+}
+
+// The game reads the value as an unsigned integer; anything else (quoted, empty, negative) is "unreadable".
+bool ParseLanguageValue(const std::string& text, int& value) {
+  if (text.empty() || text.size() > 4) return false;
+  int parsed = 0;
+  for (char c : text) {
+    if (c < '0' || c > '9') return false;
+    parsed = parsed * 10 + (c - '0');
+  }
+  value = parsed;
+  return true;
+}
+
 }  // namespace
 
 const std::vector<KeyBinding>& KeyBindings() {
@@ -328,6 +370,87 @@ Result SaveKeyboardControls(const Paths& paths, const KeyboardControls& controls
     return Result::Ok();
   } catch (...) {
     return Result::Fail("The keyboard controls could not be saved.");
+  }
+}
+
+GameLanguage LoadGameLanguage(const Paths& paths) {
+  GameLanguage language;
+  try {
+    std::string text;
+    const fs::path file = ControlsFile(paths);
+    std::error_code error;
+    if (!fs::is_regular_file(file, error) || !ReadBytes(file, text)) return language;
+    bool root_table = true;
+    ForEachLine(text, [&](std::string_view line, std::string_view) {
+      if (IsTomlTableHeader(line)) root_table = false;
+      if (!root_table) return;
+      const LanguageLine parsed = ParseLanguageLine(line);
+      int value = 0;
+      if (parsed.match && ParseLanguageValue(parsed.value, value)) {
+        language.id = value;  // the last assignment wins, like the game's TOML loader
+        language.present = true;
+      }
+    });
+  } catch (...) {
+    return GameLanguage{};
+  }
+  return language;
+}
+
+Result SaveGameLanguage(const Paths& paths, int language_id) {
+  try {
+    if (language_id < 0 || language_id > 9999) return Result::Fail("That language is not supported by the game.");
+    const fs::path file = ControlsFile(paths);
+    std::error_code error;
+    std::string original;
+    const bool exists = fs::exists(file, error);
+    if (exists && !ReadBytes(file, original)) {
+      return Result::Fail("The game settings file could not be read, so nothing was saved.");
+    }
+    const std::string text = std::to_string(language_id);
+
+    bool found = false;
+    std::string merged;
+    merged.reserve(original.size() + 32);
+    size_t insertion_position = std::string::npos;
+    bool root_table = true;
+    ForEachLine(original, [&](std::string_view line, std::string_view eol) {
+      if (root_table && IsTomlTableHeader(line)) {
+        root_table = false;
+        insertion_position = merged.size();
+      }
+      const LanguageLine parsed = root_table ? ParseLanguageLine(line) : LanguageLine{};
+      if (parsed.match) {
+        found = true;  // every root assignment is rewritten, so duplicates cannot disagree
+        merged.append(line.substr(0, parsed.value_begin));
+        merged.append(text);
+        merged.append(line.substr(parsed.value_end));
+      } else {
+        merged.append(line);
+      }
+      merged.append(eol);
+    });
+
+    if (!found) {
+      // English is the game's own default, so an absent line already means English: do not create a file or a line.
+      if (language_id == 1) return Result::Ok();
+      const size_t first_newline = original.find('\n');
+      const std::string newline =
+          first_newline != std::string::npos && first_newline > 0 && original[first_newline - 1] == '\r' ? "\r\n"
+                                                                                                           : "\n";
+      if (insertion_position == std::string::npos) insertion_position = merged.size();
+      std::string addition;
+      if (insertion_position > 0 && merged[insertion_position - 1] != '\n') addition += newline;
+      addition.append("user_language = ").append(text).append(newline);
+      merged.insert(insertion_position, addition);
+    }
+    if (merged == original && exists) return Result::Ok();
+    if (!WriteBytesAtomic(file, merged)) {
+      return Result::Fail("The language could not be saved. Is the game folder read-only?");
+    }
+    return Result::Ok();
+  } catch (...) {
+    return Result::Fail("The language could not be saved.");
   }
 }
 

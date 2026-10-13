@@ -327,7 +327,8 @@ bool ProcessorSupportsGameBuild() {
 }  // namespace
 #endif
 
-Result StartGame(const LaunchPlan& plan, double watch_seconds) {
+Result StartGame(const LaunchPlan& plan, double watch_seconds, std::atomic<bool>* process_started) {
+  if (process_started) process_started->store(false, std::memory_order_relaxed);
   try {
     std::error_code error;
     fs::path user_data_root;
@@ -380,13 +381,15 @@ Result StartGame(const LaunchPlan& plan, double watch_seconds) {
       return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
     }
     CloseHandle(process.hThread);
-    bool closed_early = false;
+    if (process_started) process_started->store(true, std::memory_order_release);
+    bool failed_early = false;
     if (watch_seconds > 0.0 &&
         WaitForSingleObject(process.hProcess, DWORD(watch_seconds * 1000.0)) == WAIT_OBJECT_0) {
-      closed_early = true;
+      DWORD exit_code = 0;
+      failed_early = !GetExitCodeProcess(process.hProcess, &exit_code) || exit_code != 0;
     }
     CloseHandle(process.hProcess);
-    if (closed_early) return Result::Fail(kGameClosedEarlyMessage);
+    if (failed_early) return Result::Fail(kGameClosedEarlyMessage);
     return Result::Ok();
 #else
     std::vector<std::string> arguments;
@@ -429,13 +432,18 @@ Result StartGame(const LaunchPlan& plan, double watch_seconds) {
     if (status != 0) {
       return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
     }
+    if (process_started) process_started->store(true, std::memory_order_release);
     if (watch_seconds > 0.0) {
       const auto deadline =
           std::chrono::steady_clock::now() + std::chrono::milliseconds(int64_t(watch_seconds * 1000.0));
       while (std::chrono::steady_clock::now() < deadline) {
         int wait_status = 0;
         const pid_t done = waitpid(child, &wait_status, WNOHANG);
-        if (done == child) return Result::Fail(kGameClosedEarlyMessage);
+        if (done == child) {
+          const bool exited_unsuccessfully = WIFSIGNALED(wait_status) ||
+              (WIFEXITED(wait_status) && WEXITSTATUS(wait_status) != 0);
+          return exited_unsuccessfully ? Result::Fail(kGameClosedEarlyMessage) : Result::Ok();
+        }
         if (done < 0) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }

@@ -5,10 +5,12 @@
 #include "launcher_core.h"
 
 #include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -29,6 +31,31 @@ std::string GpuArgument(const LaunchPlan& plan) {
     if (argument.starts_with("--vulkan_device")) return argument;
   }
   return {};
+}
+
+void TestProcessStartedBeforeWatchReturns() {
+  LaunchPlan stays;
+#ifdef _WIN32
+  stays.executable = "C:\\windows\\system32\\ping.exe";
+  stays.arguments = {"-n", "5", "127.0.0.1"};
+#else
+  stays.executable = "/bin/sleep";
+  stays.arguments = {"3"};
+#endif
+  std::atomic<bool> process_started{false};
+  std::atomic<bool> returned{false};
+  Result result;
+  std::thread watcher([&] {
+    result = StartGame(stays, 1.0, &process_started);
+    returned.store(true, std::memory_order_release);
+  });
+  for (int attempt = 0; attempt < 500 && !process_started.load() && !returned.load(); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  const bool notified_before_watch_finished = process_started.load() && !returned.load();
+  watcher.join();
+  assert(notified_before_watch_finished && result.ok);
+  std::cout << "PASS: process-start notification arrives before the watch returns.\n";
 }
 
 // Two identical GPUs are stored as "vendor:device:index" (gpus.cpp). The game's
@@ -71,17 +98,24 @@ int main() {
   TestGpuDeviceArgument();
 #ifdef _WIN32
   {
-    // A game that closes right away is reported; one that keeps running is not.
+    // An unsuccessful early exit is reported; a normal exit or a still-running process is not.
     LaunchPlan quits;
     quits.executable = "C:\\windows\\system32\\cmd.exe";
     quits.arguments = {"/c", "exit 1"};
-    const Result early = StartGame(quits, 3.0);
-    assert(!early.ok && early.error == kGameClosedEarlyMessage);
+    std::atomic<bool> process_started{false};
+    const Result early = StartGame(quits, 3.0, &process_started);
+    assert(!early.ok && early.error == kGameClosedEarlyMessage && process_started.load());
+    LaunchPlan exits_normally;
+    exits_normally.executable = "C:\\windows\\system32\\cmd.exe";
+    exits_normally.arguments = {"/c", "exit 0"};
+    assert(StartGame(exits_normally, 3.0, &process_started).ok && process_started.load());
     LaunchPlan stays;
     stays.executable = "C:\\windows\\system32\\ping.exe";
     stays.arguments = {"-n", "6", "127.0.0.1"};
-    assert(StartGame(stays, 1.0).ok);
-    std::cout << "PASS: a game that closes within the watch window is reported to the player.\n";
+    assert(StartGame(stays, 1.0, &process_started).ok && process_started.load());
+    TestProcessStartedBeforeWatchReturns();
+    std::cout << "PASS: process-start signal is set before watch completion; unsuccessful early exit is "
+                 "reported and a normal early exit is accepted.\n";
   }
   std::cout << "SKIP: RenderDoc implicit-layer suppression is a Linux launcher setting.\n";
   return 0;
@@ -116,16 +150,27 @@ int main() {
   } else {
     assert(::unsetenv("VK_LOADER_LAYERS_DISABLE") == 0);
   }
-  // A game that closes right away is reported; one that keeps running is not.
+  // An unsuccessful early exit or a signal termination is reported; normal exit is accepted.
   LaunchPlan quits;
   quits.executable = "/bin/false";
-  const Result early = StartGame(quits, 2.0);
-  assert(!early.ok && early.error == kGameClosedEarlyMessage);
+  std::atomic<bool> process_started{false};
+  const Result early = StartGame(quits, 2.0, &process_started);
+  assert(!early.ok && early.error == kGameClosedEarlyMessage && process_started.load());
+  LaunchPlan exits_normally;
+  exits_normally.executable = "/bin/true";
+  assert(StartGame(exits_normally, 2.0, &process_started).ok && process_started.load());
+  LaunchPlan crashes;
+  crashes.executable = "/bin/sh";
+  crashes.arguments = {"-c", "kill -KILL $$"};
+  const Result crashed = StartGame(crashes, 2.0, &process_started);
+  assert(!crashed.ok && crashed.error == kGameClosedEarlyMessage && process_started.load());
   LaunchPlan stays;
   stays.executable = "/bin/sleep";
   stays.arguments = {"5"};
-  assert(StartGame(stays, 1.0).ok);
-  std::cout << "PASS: a game that closes within the watch window is reported to the player.\n";
+  assert(StartGame(stays, 1.0, &process_started).ok && process_started.load());
+  TestProcessStartedBeforeWatchReturns();
+  std::cout << "PASS: process-start signal is set before watch completion; nonzero exit and signal "
+               "termination are reported; normal exit is accepted.\n";
   std::cout << "PASS: RenderDoc filter is child-only and preserves an existing MangoHud filter.\n";
   return 0;
 #endif

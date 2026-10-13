@@ -142,6 +142,9 @@ struct AppState {
   SDL_Renderer* renderer = nullptr;
   Fonts fonts;
   JobState job;
+  std::atomic<bool> launch_process_started{false};
+  std::string launch_warning;
+  bool launch_warning_pending = false;
   DialogState dialog;
   std::mutex drop_mutex;
   std::vector<std::string> dropped;
@@ -175,6 +178,7 @@ struct AppState {
   bool confirm_remove_pack = false;
   bool confirm_restore_backup = false;
   KeyboardControls controls = DefaultKeyboardControls();
+  GameLanguage language;  // user_language in wwe13.toml; English when absent
   ContentCategory content_category = ContentCategory::Superstars;
   std::string creation_sort = "name";  // name | slot | date
   bool scroll_to_candidates = false;
@@ -426,6 +430,12 @@ void StartUpdateCheck(AppState& app);
 void PollUpdateCheck(AppState& app);
 
 void PollJob(AppState& app) {
+  // StartGame runs on the worker; consume its notification here so SDL window operations remain on
+  // the UI/event thread. This is deliberately independent of job completion: the process is watched
+  // in the background after the launcher has already minimized.
+  if (app.launch_process_started.exchange(false, std::memory_order_acquire)) {
+    SDL_MinimizeWindow(app.window);
+  }
   std::function<void()> apply;
   Result result;
   bool finished = false;
@@ -443,7 +453,35 @@ void PollJob(AppState& app) {
   app.job.active.store(false);
   app.update_job = false;
   if (!result.ok) {
-    SetBanner(app, result.error.empty() ? "That action could not be completed." : result.error);
+    if (result.error == kGameClosedEarlyMessage) {
+      SDL_RestoreWindow(app.window);
+      SDL_RaiseWindow(app.window);
+#ifdef _WIN32
+      if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "WWE '13 PC Recompiled",
+                                    result.error.c_str(), app.window)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not show the startup warning dialog: %s",
+                     SDL_GetError());
+        app.launch_warning = result.error;
+        app.launch_warning_pending = true;
+      }
+#else
+      // SDL's X11 message-box implementation can wait without a mapped dialog on bare Xvfb. Keep the
+      // native SDL box for normal desktops, and let the launcher UI render the same modal for capture.
+      const char* force_ui_modal = std::getenv("WWE13_LAUNCHER_TEST_WARNING_OVERLAY");
+      if (force_ui_modal && std::string_view(force_ui_modal) == "1") {
+        app.launch_warning = result.error;
+        app.launch_warning_pending = true;
+      } else if (!SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "WWE '13 PC Recompiled",
+                                           result.error.c_str(), app.window)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Could not show the startup warning dialog: %s",
+                     SDL_GetError());
+        app.launch_warning = result.error;
+        app.launch_warning_pending = true;
+      }
+#endif
+    } else {
+      SetBanner(app, result.error.empty() ? "That action could not be completed." : result.error);
+    }
   } else {
     if (apply) apply();
   }
@@ -604,10 +642,11 @@ void LaunchNow(AppState& app) {
   const Paths paths = app.paths;
   const Settings settings = ActiveSettings(app);
   const std::vector<GpuInfo> gpus = app.gpus;
+  app.launch_process_started.store(false, std::memory_order_relaxed);
   BeginJob(app, "Starting WWE '13…", [&app, paths, settings, gpus](const ProgressFn&, CancelFlag&) {
     const LaunchPlan plan = BuildLaunchPlan(paths, settings, gpus);
-    // Watch the first seconds: if the game closes right away the launcher stays open and says so.
-    const Result result = StartGame(plan, 4.0);
+    // Watch early startup failures long enough to cover a slow graphics-driver/game startup.
+    const Result result = StartGame(plan, 90.0, &app.launch_process_started);
     return JobOutcome{result, [&app] {
                         SDL_MinimizeWindow(app.window);
                         app.running = false;
@@ -682,8 +721,9 @@ void StartInitialization(AppState& app) {
     if (exe_dir_writable) EnsureKeyboardDefaults(paths);  // first start: write the modern default keys
     if (exe_dir_writable) CleanupUpdateLeftovers(paths);  // remove *.old / *.part from a previous update
     const KeyboardControls controls = LoadKeyboardControls(paths);
+    const GameLanguage language = LoadGameLanguage(paths);
     return JobOutcome{Result::Ok(), [&app, paths, settings, settings_save, reset_hidden_1080p,
-                                      exe_dir_writable, controls, gpus, recommendation, game_files, songs,
+                                      exe_dir_writable, controls, language, gpus, recommendation, game_files, songs,
                                       backups, creations, content_packs, titantron_movies, entrance_videos] {
                          app.paths = paths;
                          app.settings = settings;
@@ -698,6 +738,7 @@ void StartInitialization(AppState& app) {
                           app.titantron_movies = titantron_movies;
                           app.entrance_videos = entrance_videos;
                          app.controls = controls;
+                         app.language = language;
                          app.initialized = true;
                          RefreshFolderInstallables(app);
                          if (app.settings.check_updates && (!app.screenshot_mode || app.update_screenshot_mode)) {
@@ -1547,6 +1588,30 @@ void DrawBanner(AppState& app) {
   ImGui::Spacing();
 }
 
+void DrawLaunchWarning(AppState& app) {
+  if (app.launch_warning_pending) {
+    ImGui::OpenPopup("WWE '13 PC Recompiled##startup-warning");
+    app.launch_warning_pending = false;
+  }
+  if (app.launch_warning.empty()) return;
+
+  ImGui::SetNextWindowSize(ImVec2(S(app, 520.0f), 0.0f), ImGuiCond_Appearing);
+  if (ImGui::BeginPopupModal("WWE '13 PC Recompiled##startup-warning", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+    ImGui::PushFont(app.fonts.barlow_regular);
+    ImGui::TextWrapped("%s", app.launch_warning.c_str());
+    ImGui::PopFont();
+    ImGui::Spacing();
+    const float button_width = S(app, 110.0f);
+    ImGui::SetCursorPosX((ImGui::GetWindowWidth() - button_width) * 0.5f);
+    if (ImGui::Button("OK", ImVec2(button_width, S(app, 38.0f)))) {
+      app.launch_warning.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
+
 bool AccentButton(const AppState& app, const char* label, ImVec2 size = ImVec2(0, 0)) {
   ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, S(app, 10.0f));
   ImGui::PushStyleColor(ImGuiCol_Button, kAccent);
@@ -1874,7 +1939,7 @@ void DrawPlay(AppState& app) {
   if (vulkan_available) {
     ImGui::TextWrapped("Recommended for this PC: %s · settings picked automatically",
                        app.recommendation.reason.c_str());
-    ImGui::TextUnformatted("To quit the game, press Alt+F4.");
+    ImGui::TextWrapped("Alt+F4 quits the game; F11 switches between fullscreen and windowed.");
   } else {
     ImGui::PushStyleColor(ImGuiCol_Text, kDanger);
     ImGui::TextWrapped("%s", kNoVulkanMessage);
@@ -1968,6 +2033,23 @@ void DrawSegment(const AppState& app, const char* label, bool selected, float wi
   if (ImGui::Button(label, ImVec2(width, S(app, 34.0f)))) action();
   ImGui::PopStyleColor(3);
   ImGui::PopStyleVar();
+}
+
+struct GameLanguageChoice {
+  int id;
+  const char* name;
+};
+// The languages the game ships menus and text for (XLanguage ids). Commentary has no translated audio.
+constexpr std::array<GameLanguageChoice, 5> kGameLanguages{{
+    {1, "English"}, {3, "German"}, {4, "French"}, {5, "Spanish"}, {6, "Italian"},
+}};
+
+std::string GameLanguageName(int id) {
+  for (const auto& choice : kGameLanguages) {
+    if (choice.id == id) return choice.name;
+  }
+  // A value set by hand in wwe13.toml: show it as it is and leave it alone until the player picks a language.
+  return "Other (code " + std::to_string(id) + ")";
 }
 
 void DrawSettings(AppState& app) {
@@ -2161,6 +2243,36 @@ void DrawSettings(AppState& app) {
   }
   ImGui::PopStyleVar();
   ImGui::PopStyleColor(3);
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
+
+  // The game's menu language is a personal preference too: it lives in wwe13.toml (read when the game starts).
+  ImGui::Spacing();
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, kRaised);
+  ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, S(app, 10.0f));
+  ImGui::BeginChild("settings-language-row", ImVec2(0, S(app, compact ? 60.0f : 74.0f)), false,
+                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::SetCursorPos(S(app, 14, compact ? 8.0f : 11.0f));
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted("LANGUAGE");
+  ImGui::SameLine(S(app, 170.0f));
+  const std::string language_preview = GameLanguageName(app.language.id);
+  if (ImGui::BeginCombo("##language", language_preview.c_str())) {
+    for (const auto& choice : kGameLanguages) {
+      if (ImGui::Selectable(choice.name, app.language.id == choice.id)) {
+        const Result saved = SaveGameLanguage(app.paths, choice.id);
+        if (saved.ok) {
+          app.language = LoadGameLanguage(app.paths);
+        } else {
+          SetBanner(app, saved.error);
+        }
+      }
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SetCursorPosX(S(app, 14.0f));
+  DrawTextDisabled(app, "Menus and text only - commentary stays English. Takes effect next time the game starts.");
   ImGui::EndChild();
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();
@@ -2393,6 +2505,15 @@ void StartRemoveCreationSafe(AppState& app, std::string package_name) {
   app.confirm_remove_creation = true;
 }
 
+// True when an installed creation of this kind is not listed by a save-indexed pack: the game only shows loose
+// packages that the save file indexes, so those need the pack's SaveData.dat (Save Data > Replace current save).
+bool HasUnindexedCreations(const AppState& app, CreationKind kind) {
+  for (const auto& creation : app.creations) {
+    if (creation.kind == kind && !IsSaveIndexed(app, creation.package_name)) return true;
+  }
+  return false;
+}
+
 void DrawCreationCategory(AppState& app, CreationKind kind) {
   const ContentCategory category = [&] {
     switch (kind) {
@@ -2405,6 +2526,12 @@ void DrawCreationCategory(AppState& app, CreationKind kind) {
     return ContentCategory::Superstars;
   }();
   DrawSecondaryWrapped(app, ContentCategoryHint(category));
+  if (kind != CreationKind::kLogos && HasUnindexedCreations(app, kind)) {
+    ImGui::Spacing();
+    DrawSecondaryWrapped(app, "New creations only appear in game if your save lists them. If the pack came with a "
+                              "SaveData.dat, use Save Data > Replace current save (your current save is backed up "
+                              "first).");
+  }
   ImGui::Spacing();
 
   const char* extensions = kind == CreationKind::kSuperstar ? "cas"
@@ -3510,6 +3637,7 @@ void DrawMain(AppState& app) {
   ImGui::EndChild();
   DrawFooter(app);
   ImGui::EndChild();
+  DrawLaunchWarning(app);
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();
   ImGui::End();

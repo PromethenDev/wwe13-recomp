@@ -38,6 +38,7 @@
 #include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/sysinfo.h>
+#include <poll.h>
 #include <unistd.h>
 #include <ucontext.h>
 #endif
@@ -255,6 +256,21 @@ void FlushAllLoggerCategories() {
   }
 }
 
+// Crash path only: flush what is buffered, then silence every logger so nothing else is written
+// to the log file. The log sink writes at its own file offset while the crash report is appended
+// through a separate handle at the end of the file; a log line written (or a buffer flushed) after
+// the report was appended would land on top of the report header (GitHub #31: the crash report
+// arrived without its first lines).
+void FlushAndSilenceAllLoggerCategories() {
+  FlushAllLoggerCategories();
+  for (const auto& category : rex::GetAllCategories()) {
+    if (category.logger) {
+      category.logger->set_level(spdlog::level::off);
+    }
+  }
+  FlushAllLoggerCategories();
+}
+
 #ifdef _WIN32
 
 HANDLE g_crash_log = INVALID_HANDLE_VALUE;
@@ -264,7 +280,7 @@ HANDLE g_flush_complete_event = nullptr;
 
 DWORD WINAPI CrashFlushWorker(void*) {
   while (WaitForSingleObject(g_flush_request_event, INFINITE) == WAIT_OBJECT_0) {
-    FlushAllLoggerCategories();
+    FlushAndSilenceAllLoggerCategories();
     if (!SetEvent(g_flush_complete_event)) {
       return 1;
     }
@@ -391,12 +407,14 @@ LONG WINAPI Wwe13UnhandledExceptionFilter(EXCEPTION_POINTERS* info) {
                       host_pc - reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr))),
                   thread_name.c_str(),
                   static_cast<unsigned long>(thread_id));
-    AppendToCrashLog(message.data());
-    AppendStackToCrashLog(info->ContextRecord);
+    // Flush the logger first: its buffered lines go out before the report is appended, so
+    // nothing the logger writes later can land on top of the report header.
     if (g_flush_request_event && g_flush_complete_event &&
         SetEvent(g_flush_request_event)) {
       WaitForSingleObject(g_flush_complete_event, 3000);
     }
+    AppendToCrashLog(message.data());
+    AppendStackToCrashLog(info->ContextRecord);
   }
   if (g_previous_exception_filter && g_previous_exception_filter != Wwe13UnhandledExceptionFilter) {
     return g_previous_exception_filter(info);
@@ -797,23 +815,32 @@ void CrashSignalHandler(int signal_number, siginfo_t* signal_info, void* signal_
   event.host_pc = HostProgramCounter(signal_context);
   event.thread_id = static_cast<pid_t>(syscall(SYS_gettid));
   SignalSafeThreadName(event.thread_name, event.thread_id);
-  WriteCrashBlockSignalSafe(event);
-  WriteCrashDetailsSignalSafe(signal_context);
-
-  // The reporter thread flushes the normal spdlog sinks outside signal context.
-  // A bounded wait prevents a deadlocked sink from trapping a fatal process.
+  // The reporter thread flushes the normal spdlog sinks outside signal context and then silences
+  // them. This must happen BEFORE the report is written: the log sink writes at its own file
+  // offset, so anything it flushes after the report was appended would overwrite the report's
+  // first lines (GitHub #31). The wait is bounded (poll, not alarm) so a deadlocked sink delays
+  // the report by at most 3 s instead of losing it.
   if (g_request_pipe[1] >= 0 && g_ack_pipe[0] >= 0) {
     const char request = 'F';
     if (write(g_request_pipe[1], &request, sizeof(request)) == sizeof(request)) {
-      alarm(3);
-      char acknowledgement = 0;
-      ssize_t result;
+      struct pollfd wait_for_ack {};
+      wait_for_ack.fd = g_ack_pipe[0];
+      wait_for_ack.events = POLLIN;
+      int polled;
       do {
-        result = read(g_ack_pipe[0], &acknowledgement, sizeof(acknowledgement));
-      } while (result < 0 && errno == EINTR);
-      alarm(0);
+        polled = poll(&wait_for_ack, 1, 3000);
+      } while (polled < 0 && errno == EINTR);
+      if (polled > 0) {
+        char acknowledgement = 0;
+        ssize_t result;
+        do {
+          result = read(g_ack_pipe[0], &acknowledgement, sizeof(acknowledgement));
+        } while (result < 0 && errno == EINTR);
+      }
     }
   }
+  WriteCrashBlockSignalSafe(event);
+  WriteCrashDetailsSignalSafe(signal_context);
   ReraiseWithDefaultDisposition(signal_number);
 }
 
@@ -821,7 +848,7 @@ void CrashFlushWorker(int request_fd, int acknowledgement_fd) {
   char request = 0;
   while (read(request_fd, &request, sizeof(request)) == sizeof(request)) {
     if (request == 'F') {
-      FlushAllLoggerCategories();
+      FlushAndSilenceAllLoggerCategories();
       const char acknowledgement = 'A';
       if (write(acknowledgement_fd, &acknowledgement, sizeof(acknowledgement)) !=
           sizeof(acknowledgement)) {

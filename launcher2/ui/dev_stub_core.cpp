@@ -208,7 +208,13 @@ LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings&, const std::vecto
   return plan;
 }
 
-Result StartGame(const LaunchPlan&) { return Result::Ok(); }
+Result StartGame(const LaunchPlan&, double, std::atomic<bool>* process_started) {
+  if (process_started) {
+    process_started->store(false, std::memory_order_relaxed);
+    process_started->store(true, std::memory_order_release);
+  }
+  return Result::Ok();
+}
 
 Result SaveBugReport(const Paths& paths, fs::path* created_zip) {
   if (created_zip) *created_zip = paths.exe_dir / "wwe13-bug-report-sample.zip";

@@ -23,7 +23,7 @@ You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game fil
 
 ## Install and play
 
-1. Download `WWE13-Recomp-v1.4.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
+1. Download `WWE13-Recomp-v1.5.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
 2. Start **`WWE13 Launcher.exe`** (Linux: `Linux-x86_64/wwe13-launcher`).
 3. In **Game files**, do one of the following:
    - put your game folder in the `WWE 13` folder beside the launcher, or
@@ -75,14 +75,17 @@ cannot reach GitHub, it says nothing and starts normally.
 
 - **Resolution** – the sharpness the game renders at. 480p is the fastest (handhelds and integrated graphics); 720p is the original Xbox 360 sharpness; 1440p needs a strong graphics card.
 - **Frame rate** – *Classic* (60 in matches, 30 in entrances and cutscenes, like the console), *60 Everywhere* (needs a strong PC), or *30 Locked* (steady, best for laptops and handhelds).
-- **Display** – fullscreen or windowed (press **F11** in the game to switch at any time); **Graphics card** – for PCs with two GPUs.
+- **Display** – fullscreen or windowed; **Graphics card** – for PCs with two GPUs.
 - **Stretch to fill wide screens** – fill a 21:9 or 16:10 screen instead of showing black bars (the 16:9 picture is stretched). **Sync frames to the monitor** – on by default; Windows only, turn it off if fullscreen stutters on a high refresh rate or FreeSync / G-SYNC monitor.
+- **Language** – the language of the game's menus and text: English, German, French, Spanish or Italian. Commentary stays English. It is saved in `wwe13.toml` and takes effect the next time the game starts.
 - **Start straight away next time** – skip the launcher on later starts. Hold **Shift** while it starts to come back to the settings.
 - **Content** – everything you add to the game in one place: custom Superstars, Entrances, Arenas, Logos, your own entrance **Music**, and **Save Data** (Back Up Now, Restore, and imported packs).
 
 ## Controls
 
 An Xbox-compatible controller is recommended. The keyboard also works as a controller: the default keys follow modern WWE 2K games on PC - **WASD** move, **J** strike (X), **L** grapple (A; also confirms in menus), **K** Irish whip / pin (B; back in menus), **Space** signature / finisher (Y), **1** reversal (RT), **Left Shift** run (LT), **U** pick up / in-out of the ring (LB), **Left Ctrl** limb targeting (RB), arrow keys taunts (D-pad), **Esc** pause. See and change every key on the launcher's **Controls** page. When the game's on-screen keyboard is open (for example, naming a story), you can type with your PC keyboard and paste with **Ctrl+V**. Names are upper case, like on the console.
+
+While playing, **Alt+F4** quits the game; **F11** switches between fullscreen and windowed.
 
 ## Saves and DLC
 
@@ -91,6 +94,8 @@ The game keeps saves, DLC and settings in `userdata/` beside the launcher. It is
 ## Adding creations
 
 Open **Content** in the launcher and pick a category (Superstars, Entrances, Arenas or Logos). **Add…** selects Xbox 360 creation packages (Superstar `.cas`, Entrance `.enc`, Arena `.car`, Paint Tool logo `.pt`); **Add a folder…** imports a whole folder of them. Each list shows the in-game name and slot and can be sorted by name, slot or date. The launcher backs up your saves before changing anything. You can also drag package files onto the page.
+
+New creations only appear in game if your save lists them, so the Superstars, Entrances and Arenas pages show a short reminder while any installed item is not covered by an imported save.
 
 Some creation packs include a matching `SaveData.dat` file that lists their custom slots. Use **Content → Save Data → Replace current save…** to import it; this replaces your current WWE '13 progress, so the launcher asks you to confirm and makes a backup first. Items imported together this way form a **pack**: remove them with **Remove pack** under **Save Data**, which also puts your save back the way it was before the import. Removing one item of a pack on its own would make the game report missing content, so the launcher does not allow it.
 
