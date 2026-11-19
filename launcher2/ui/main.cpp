@@ -2070,6 +2070,14 @@ void DrawPlay(AppState& app) {
   ImGui::PopStyleColor(4);
   ImGui::PopStyleVar(2);
 
+  // Owner 2026-11-19: the native renderers ship as experimental; say so where PLAY starts them.
+  if (g_port_build && app.settings.graphics_api != GraphicsApi::kEmulated) {
+    ImGui::Spacing();
+    ImGui::PushFont(app.fonts.barlow_small);
+    DrawTextDisabled(app, "Native renderer (experimental): if a scene looks wrong or the game crashes, "
+                          "choose Graphics API \"Emulated\" in Settings.");
+    ImGui::PopFont();
+  }
   ImGui::Spacing();
   // Measure the controller status first: it sits right-aligned after the checkbox column when
   // there is room and moves to its own line below it otherwise, so the two never overlap.
@@ -2349,10 +2357,11 @@ void DrawSettings(AppState& app) {
       const char* name;
       const char* exe;
     };
-    static constexpr ApiChoice kApis[] = {{GraphicsApi::kAuto, "Automatic", nullptr},
-                                          {GraphicsApi::kVulkan, "Vulkan", "wwe13_native.exe"},
-                                          {GraphicsApi::kD3D12, "DirectX 12", "wwe13_d3d12.exe"},
-                                          {GraphicsApi::kD3D11, "DirectX 11", "wwe13_d3d11.exe"},
+    // The native renderers are experimental (owner 2026-11-19): the names say so, and so does the tooltip.
+    static constexpr ApiChoice kApis[] = {{GraphicsApi::kAuto, "Automatic (experimental)", nullptr},
+                                          {GraphicsApi::kVulkan, "Vulkan (experimental)", "wwe13_native.exe"},
+                                          {GraphicsApi::kD3D12, "DirectX 12 (experimental)", "wwe13_d3d12.exe"},
+                                          {GraphicsApi::kD3D11, "DirectX 11 (experimental)", "wwe13_d3d11.exe"},
                                           {GraphicsApi::kEmulated, "Emulated (Xenos)", nullptr}};
     const char* api_preview = kApis[0].name;
     for (const ApiChoice& choice : kApis) {
@@ -2362,7 +2371,9 @@ void DrawSettings(AppState& app) {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Graphics API");
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("Automatic starts Vulkan and, when the PC can't run it, DirectX 12, then DirectX 11. "
+      ImGui::SetTooltip("The native renderers (Vulkan, DirectX 12, DirectX 11) are EXPERIMENTAL: faster, but "
+                        "some scenes may look wrong or crash. If that happens, pick Emulated.\n"
+                        "Automatic starts Vulkan and, when the PC can't run it, DirectX 12, then DirectX 11. "
                         "Emulated draws through the Xbox 360 graphics chip emulation (slower).");
     }
     ImGui::SameLine();
