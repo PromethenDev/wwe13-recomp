@@ -1,0 +1,45 @@
+From a0a8e01a71fe4d269e3489a96bdf2273cccaf27b Mon Sep 17 00:00:00 2001
+From: PromethenDev <PromethenDev@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 07:30:57 -0700
+Subject: [PATCH 94/96] GitHub #12 (candidate, NOT reproduced): saved-game
+ content with an empty/dotless sidecar display name is listed under its
+ package name (as Xenia does). The game's per-category content handler
+ (sub_8281AB58, 10 categories .rec/.enc/.scn/.ss/.sas/.cas/.pt/.dat/.car/.cab)
+ copies the text after the first '.' of each display name; no dot -> reads
+ guest 0x1 -> the reported crash after loading community packs. Static proof
+ in wwe13 creations out/gh2/REPORT.md; boot-to-menu runs with crafted dotless
+ packs never enter that handler, so crash-before/menu-after is unproven.
+ Regression runs (pack, crafted, empty userdata) reach the menu.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/system/xam/content_manager.cpp | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+index 50c7d6b..997cae5 100644
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -165,6 +165,19 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
+     XCONTENT_AGGREGATE_DATA content_data;
+     if (XSUCCEEDED(ReadContentHeaderFile(rex::path_to_utf8(file_info.name), xuid, title_id,
+                                          content_type, content_data))) {
++      // GitHub #12: the game parses a saved-game entry's display name by copying the text after
++      // the first '.'; a community creation pack whose STFS display name has no dot (or is empty)
++      // makes it read through a null pointer right before the main menu. Sidecars written for
++      // saved games are free-form, so fall back to the package (directory) name whenever the
++      // stored display name cannot satisfy that contract (Xenia lists saved-game content by the
++      // package name). Pack display names that already contain a dot are unchanged.
++      if (content_type == XContentType::kSavedGame) {
++        const std::u16string display_name = content_data.display_name();
++        if (display_name.empty() || display_name.find(u'.') == std::u16string::npos) {
++          content_data.set_display_name(rex::path_to_utf16(file_info.name));
++          content_data.set_file_name(rex::path_to_utf8(file_info.name));
++        }
++      }
+       result.emplace_back(std::move(content_data));
+     } else {
+       content_data.device_id = device_id;
+-- 
+2.43.0
+

@@ -1,0 +1,11 @@
+[project]
+name = "wwe13"
+sdk_version = "pending-local-build"
+game_root = "game"
+
+[entrypoint]
+file_path = "game/default.xex"
+out_directory_path = "generated/default"
+includes = []
+
+[entrypoint.functions]

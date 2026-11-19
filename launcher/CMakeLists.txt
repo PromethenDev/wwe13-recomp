@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.24)
+project(wwe13_launcher LANGUAGES CXX)
+
+add_executable(wwe13-enhanced WIN32 main.cpp)
+target_compile_features(wwe13-enhanced PRIVATE cxx_std_20)
+target_compile_definitions(wwe13-enhanced PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(wwe13-enhanced PRIVATE shell32 ole32 dwmapi bcrypt)
+if(MSVC)
+  target_compile_options(wwe13-enhanced PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(wwe13-enhanced PRIVATE -Wall -Wextra -Wpedantic)
+endif()

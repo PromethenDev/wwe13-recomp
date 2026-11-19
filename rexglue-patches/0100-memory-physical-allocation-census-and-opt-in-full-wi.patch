@@ -1,0 +1,158 @@
+From b4c66a3904cd434bd498c8d373d46850cc026ea4 Mon Sep 17 00:00:00 2001
+From: iMrBurn <iMrBurn@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 13:27:16 +0100
+Subject: [PATCH] memory: physical allocation census and opt-in full-window
+ fallback (GitHub #75)
+
+WWE13_PHYS_CENSUS=1 logs every MmAllocatePhysicalMemoryEx / MmFreePhysicalMemory
+with the guest call chain (wrapper LR plus two caller LRs from the back chain).
+
+physical_window_fallback (default off): when an allocation limited to an
+address window finds the window full, place it just above the window instead
+of returning NULL. Off because WWE '13 measures a pool window at match load by
+allocating 1 MB blocks until one fails; with the fallback that loop takes memory
+from the other pools. WWE13_PHYS_FALLBACK_TEST=N forces every Nth windowed
+request through the fallback for testing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kernel/xboxkrnl/xboxkrnl_memory.cpp | 94 ++++++++++++++++++++++++-
+ 1 file changed, 92 insertions(+), 2 deletions(-)
+
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_memory.cpp b/src/kernel/xboxkrnl/xboxkrnl_memory.cpp
+index 37f23ba..43a108e 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_memory.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_memory.cpp
+@@ -12,9 +12,12 @@
+ // Disable warnings about unused parameters for kernel functions
+ #pragma GCC diagnostic ignored "-Wunused-parameter"
+ 
++#include <atomic>
++#include <cstdlib>
+ #include <cstring>
+ 
+ #include <rex/assert.h>
++#include <rex/system/thread_state.h>
+ #include <rex/cvar.h>
+ #include <rex/kernel/xboxkrnl/private.h>
+ #include <rex/logging.h>
+@@ -28,11 +31,51 @@
+ REXCVAR_DEFINE_BOOL(ignore_offset_for_ranged_allocations, false, "Memory",
+                     "Allows to ignore 4k offset for physical allocations with provided range. "
+                     "Certain titles check if result matches provided lower range.");
++// Off by default: WWE '13 measures a pool window by allocating 1 MB blocks until one fails
++// (match load, window size 0x680000); with the fallback that loop never ends early and takes
++// memory from every other pool. Kept as an experiment switch for GitHub #75.
++REXCVAR_DEFINE_BOOL(physical_window_fallback, false, "Memory",
++                    "When a physical allocation limited to an address window finds the window "
++                    "full, place it just above the window instead of returning NULL.");
+ 
+ namespace rex::kernel::xboxkrnl {
+ using namespace rex::system;
+ 
+ namespace {
++// WWE13_PHYS_CENSUS=1: one log line per physical allocation / free with the guest
++// call chain (wrapper LR plus two caller LRs read from the guest back chain).
++// Diagnostic only; no behavior change.
++bool PhysCensusEnabled() {
++  static const bool enabled = [] {
++    const char* v = std::getenv("WWE13_PHYS_CENSUS");
++    return v && v[0] == '1';
++  }();
++  return enabled;
++}
++
++void GuestCallChain(uint32_t out[3]) {
++  out[0] = out[1] = out[2] = 0;
++  const auto* ts = rex::runtime::ThreadState::Get();
++  const auto* ctx = ts ? ts->context() : nullptr;
++  if (!ctx) {
++    return;
++  }
++  out[0] = static_cast<uint32_t>(ctx->lr);
++  auto* mem = REX_KERNEL_MEMORY();
++  uint32_t frame = static_cast<uint32_t>(ctx->r1.u32);
++  for (int i = 1; i < 3; ++i) {
++    if (frame < 0x10000 || frame >= 0xA0000000u) {
++      return;
++    }
++    const uint32_t prev = memory::load_and_swap<uint32_t>(mem->TranslateVirtual(frame));
++    if (prev <= frame || prev - frame > 0x100000 || prev >= 0xA0000000u) {
++      return;
++    }
++    out[i] = memory::load_and_swap<uint32_t>(mem->TranslateVirtual(prev - 8));
++    frame = prev;
++  }
++}
++
+ // Cycle-22 diagnostic: bounded trace of 1264-class (1200..1300 byte) virtual
+ // allocations/frees. Phase 2 (logs/cycle22-static.txt) shows the 1264-byte
+ // movie-player struct is allocated by the guest CRT heap (sub_822047A0), whose
+@@ -486,8 +529,49 @@ ppc_u32_result_t MmAllocatePhysicalMemoryEx_entry(ppc_u32_t flags, ppc_u32_t reg
+   heap_min_addr = heap_base + std::min(heap_min_addr, heap_size - 1);
+   heap_max_addr = heap_base + std::min(heap_max_addr, heap_size - 1);
+   uint32_t base_address;
+-  if (!heap->AllocRange(heap_min_addr, heap_max_addr, adjusted_size, adjusted_alignment,
+-                        allocation_type, protect, top_down, &base_address)) {
++  // Test hook: WWE13_PHYS_FALLBACK_TEST=N makes every Nth windowed request skip its window,
++  // so the fallback below runs during normal play.
++  static const uint32_t fallback_test_every = [] {
++    const char* v = std::getenv("WWE13_PHYS_FALLBACK_TEST");
++    return v ? static_cast<uint32_t>(std::strtoul(v, nullptr, 10)) : 0u;
++  }();
++  static std::atomic<uint32_t> windowed_requests{0};
++  const uint32_t heap_top = heap_base + (heap_size - 1);
++  const bool windowed = heap_max_addr < heap_top;
++  const bool forced_miss = windowed && fallback_test_every &&
++                           (windowed_requests.fetch_add(1) % fallback_test_every) ==
++                               fallback_test_every - 1;
++  bool ok = !forced_miss &&
++            heap->AllocRange(heap_min_addr, heap_max_addr, adjusted_size, adjusted_alignment,
++                             allocation_type, protect, top_down, &base_address);
++  // WWE '13 gives each memory pool a physical window and only checks that the result is not
++  // below the window's minimum (sub_821FDD90). When a window is full (Create-a-Wrestler with a
++  // detailed wrestler, GitHub #75), the title receives NULL and dereferences it. Opt-in only:
++  // see the cvar comment.
++  if (!ok && windowed && (forced_miss || REXCVAR_GET(physical_window_fallback))) {
++    ok = heap->AllocRange(heap_max_addr + 1, heap_top, adjusted_size, adjusted_alignment,
++                          allocation_type, protect, false, &base_address) ||
++         heap->AllocRange(heap_min_addr, heap_top, adjusted_size, adjusted_alignment,
++                          allocation_type, protect, false, &base_address);
++    static std::atomic<uint32_t> fallback_logs{0};
++    if (fallback_logs.fetch_add(1) < 16) {
++      REXKRNL_WARN(
++          "[phys-window-fallback] window {:#x}-{:#x} full for {:#x} bytes; placed at {:08X}{}",
++          (uint32_t)min_addr_range, (uint32_t)max_addr_range, adjusted_size,
++          ok ? base_address : 0u, forced_miss ? " (test)" : "");
++    }
++  }
++  if (PhysCensusEnabled()) {
++    uint32_t chain[3];
++    GuestCallChain(chain);
++    REXKRNL_INFO(
++        "[phys] alloc size={:#x} page={:#x} min={:#x} max={:#x} align={:#x} prot={:#x} -> {:08X} "
++        "lr={:08X} {:08X} {:08X}",
++        adjusted_size, page_size, (uint32_t)min_addr_range, (uint32_t)max_addr_range,
++        adjusted_alignment, (uint32_t)protect_bits, ok ? base_address : 0u, chain[0], chain[1],
++        chain[2]);
++  }
++  if (!ok) {
+     // Failed - assume no memory available.
+     return 0;
+   }
+@@ -507,6 +591,12 @@ void MmFreePhysicalMemory_entry(ppc_u32_t type, ppc_u32_t base_address) {
+ 
+   assert_true((base_address & 0x1F) == 0);
+ 
++  if (PhysCensusEnabled()) {
++    uint32_t chain[3];
++    GuestCallChain(chain);
++    REXKRNL_INFO("[phys] free {:08X} lr={:08X} {:08X} {:08X}", (uint32_t)base_address, chain[0],
++                 chain[1], chain[2]);
++  }
+   auto heap = REX_KERNEL_MEMORY()->LookupHeap(base_address);
+   heap->Release(base_address);
+ }
+-- 
+2.55.0.windows.5
+

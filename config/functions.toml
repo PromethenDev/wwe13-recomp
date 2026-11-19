@@ -1,0 +1,415 @@
+
+[functions]
+
+0x82D4E278 = { name = "wwe13_leaf_82D4BE50", size = 0x70 }   # frameless leaf; ends at PDATA start 0x82D4BEC0  # base 0x82D4BE50 (shift)
+0x82D4CF20 = { name = "wwe13_leaf_82D4A9D0", size = 0x78 }   # frameless leaf; ends at PDATA start 0x82D4AA48  # base 0x82D4A9D0 (shift)
+0x826BEF70 = { name = "wwe13_thunk_826BD340", size = 0x8 }   # 2-instr forwarder; next PDATA start 0x826BD348  # base 0x826BD340 (shift)
+0x83228F10 = { name = "wwe13_vtbl_832265D0", size = 0x48 }   # vtable dispatcher; ends at blr 0x83226614  # base 0x832265D0 (shift)
+
+0x83330200 = { name = "wwe13_static_init_8332D950", size = 0x30 }   # init loop + tail call; 0x30 covers the alignment word before sub_8332D980  # base 0x8332D950 (shift)
+
+0x8319F450 = { name = "wwe13_vtbl_slot108_8319C8D8", size = 0xF4 }   # 61 instructions; terminating tail `bctr` at 0x8319C9C8  # base 0x8319C8D8 (search-semantic)
+
+0x8319F420 = { name = "wwe13_vtbl_slot4C_8319C8B8", size = 0x8 }   # 2-instruction thunk; terminating `b 0x8319CA28` at 0x8319C8BC  # base 0x8319C8B8 (shift)
+
+0x82489908 = { name = "wwe13_thread_start_82488F08", size = 0x14 }   # 5 instructions; terminating `blr` at 0x82488F18  # base 0x82488F08 (shift)
+
+0x82AA5890 = { name = "wwe13_thid15_vtbl_82AA2FC0", size = 0x10 }   # 4 instructions; terminating `blr` at 0x82AA2FCC  # base 0x82AA2FC0 (shift)
+
+0x831A0F80 = { name = "wwe13_vtbl_slot44_8319E418", size = 0x18 }  # base 0x8319E418 (shift)
+
+0x8319A1F8 = { name = "wwe13_vtbl_slot4C_83197770", size = 0x8 }  # base 0x83197770 (search-semantic)
+
+0x823B6148 = { name = "wwe13_vtbl_slot18_823B1BA8", size = 0xC }  # base 0x823B1BA8 (search-semantic)
+
+0x8239EAE0 = { name = "wwe13_vtbl_thunk_8239E480", size = 0x10 }  # base 0x8239E480 (shift)
+
+0x8239E8B0 = { name = "wwe13_vtbl_thunk_8239E250", size = 0x10 }  # base 0x8239E250 (shift)
+
+0x8239EC20 = { name = "wwe13_vtbl_thunk_8239E5C0", size = 0x10 }  # base 0x8239E5C0 (shift)
+
+0x8239F0E0 = { name = "wwe13_vtbl_thunk_8239EA80", size = 0x10 }  # base 0x8239EA80 (shift)
+
+0x8239EF60 = { name = "wwe13_vtbl_thunk_8239E900", size = 0x10 }  # base 0x8239E900 (shift)
+
+0x829FE8E8 = { name = "wwe13_vtbl_thunk_829FC348", size = 0x18 }  # base 0x829FC348 (shift)
+
+0x8239EE10 = { name = "wwe13_vtbl_thunk_8239E7B0", size = 0x10 }  # base 0x8239E7B0 (shift)
+
+0x8239E720 = { name = "wwe13_vtbl_thunk_8239E0C0", size = 0x10 }  # base 0x8239E0C0 (shift)
+
+0x8239E630 = { name = "wwe13_vtbl_thunk_8239DFD0", size = 0x10 }  # base 0x8239DFD0 (shift)
+
+0x8239EB60 = { name = "wwe13_vtbl_thunk_8239E500", size = 0x10 }  # base 0x8239E500 (shift)
+
+0x8239EF40 = { name = "wwe13_vtbl_thunk_8239E8E0", size = 0x10 }  # base 0x8239E8E0 (shift)
+
+0x8239ED50 = { name = "wwe13_vtbl_thunk_8239E6F0", size = 0x10 }  # base 0x8239E6F0 (shift)
+
+0x8239E8A0 = { name = "wwe13_vtbl_thunk_8239E240", size = 0x10 }  # base 0x8239E240 (shift)
+
+0x8239EBD0 = { name = "wwe13_vtbl_thunk_8239E570", size = 0x10 }  # base 0x8239E570 (shift)
+
+0x8239E5F0 = { name = "wwe13_vtbl_thunk_8239DF90", size = 0x10 }  # base 0x8239DF90 (shift)
+
+0x8239EAF0 = { name = "wwe13_vtbl_thunk_8239E490", size = 0x10 }  # base 0x8239E490 (shift)
+
+0x8239E580 = { name = "wwe13_vtbl_thunk_8239DF20", size = 0x10 }  # base 0x8239DF20 (shift)
+
+0x8239ECF0 = { name = "wwe13_vtbl_thunk_8239E690", size = 0x10 }  # base 0x8239E690 (shift)
+
+0x8239EDF0 = { name = "wwe13_vtbl_thunk_8239E790", size = 0x10 }  # base 0x8239E790 (shift)
+
+0x8239E9C0 = { name = "wwe13_vtbl_thunk_8239E360", size = 0x10 }  # base 0x8239E360 (shift)
+
+0x82F9A448 = { name = "wwe13_adapter_82F983A0", size = 0x18 }  # base 0x82F983A0 (shift)
+
+0x8239E890 = { name = "wwe13_vtbl_thunk_8239E230", size = 0x10 }  # base 0x8239E230 (shift)
+
+0x8239E950 = { name = "wwe13_vtbl_thunk_8239E2F0", size = 0x10 }  # base 0x8239E2F0 (shift)
+
+0x8239EC30 = { name = "wwe13_vtbl_thunk_8239E5D0", size = 0x10 }  # base 0x8239E5D0 (shift)
+
+0x8239F120 = { name = "wwe13_vtbl_thunk_8239EAC0", size = 0x10 }  # base 0x8239EAC0 (shift)
+
+0x8239F070 = { name = "wwe13_vtbl_thunk_8239EA10", size = 0x10 }  # base 0x8239EA10 (shift)
+
+0x8239EC70 = { name = "wwe13_vtbl_thunk_8239E610", size = 0x10 }  # base 0x8239E610 (shift)
+
+0x8239EF90 = { name = "wwe13_vtbl_thunk_8239E930", size = 0x10 }  # base 0x8239E930 (shift)
+
+0x8239EC10 = { name = "wwe13_vtbl_thunk_8239E5B0", size = 0x10 }  # base 0x8239E5B0 (shift)
+
+0x8239EA20 = { name = "wwe13_vtbl_thunk_8239E3C0", size = 0x10 }  # base 0x8239E3C0 (shift)
+
+0x8239E810 = { name = "wwe13_vtbl_thunk_8239E1B0", size = 0x10 }  # base 0x8239E1B0 (shift)
+
+0x8239F050 = { name = "wwe13_vtbl_thunk_8239E9F0", size = 0x10 }  # base 0x8239E9F0 (shift)
+
+0x8239E550 = { name = "wwe13_vtbl_thunk_8239DEF0", size = 0x10 }  # base 0x8239DEF0 (shift)
+
+0x8239EF10 = { name = "wwe13_vtbl_thunk_8239E8B0", size = 0x10 }  # base 0x8239E8B0 (shift)
+
+0x8239ECC0 = { name = "wwe13_vtbl_thunk_8239E660", size = 0x10 }  # base 0x8239E660 (shift)
+
+0x8239ED20 = { name = "wwe13_vtbl_thunk_8239E6C0", size = 0x10 }  # base 0x8239E6C0 (shift)
+
+0x8239F0A0 = { name = "wwe13_vtbl_thunk_8239EA40", size = 0x10 }  # base 0x8239EA40 (shift)
+
+0x8239F040 = { name = "wwe13_vtbl_thunk_8239E9E0", size = 0x10 }  # base 0x8239E9E0 (shift)
+
+0x8239E930 = { name = "wwe13_vtbl_thunk_8239E2D0", size = 0x10 }  # base 0x8239E2D0 (shift)
+
+0x8239EDE0 = { name = "wwe13_vtbl_thunk_8239E780", size = 0x10 }  # base 0x8239E780 (shift)
+
+0x8239F100 = { name = "wwe13_vtbl_thunk_8239EAA0", size = 0x10 }  # base 0x8239EAA0 (shift)
+
+0x8239EE50 = { name = "wwe13_vtbl_thunk_8239E7F0", size = 0x10 }  # base 0x8239E7F0 (shift)
+
+0x8239EB90 = { name = "wwe13_vtbl_thunk_8239E530", size = 0x10 }  # base 0x8239E530 (shift)
+0x8239EBA0 = { name = "wwe13_vtbl_thunk_8239E540", size = 0x10 }  # base 0x8239E540 (shift)
+0x8239EBB0 = { name = "wwe13_vtbl_thunk_8239E550", size = 0x10 }  # base 0x8239E550 (shift)
+
+0x8239EB00 = { name = "wwe13_vtbl_thunk_8239E4A0", size = 0x10 }  # base 0x8239E4A0 (shift)
+0x8239EB10 = { name = "wwe13_vtbl_thunk_8239E4B0", size = 0x10 }  # base 0x8239E4B0 (shift)
+0x8239EB20 = { name = "wwe13_vtbl_thunk_8239E4C0", size = 0x10 }  # base 0x8239E4C0 (shift)
+
+0x8239E670 = { name = "wwe13_vtbl_thunk_8239E010", size = 0x10 }  # base 0x8239E010 (shift)
+0x8239E680 = { name = "wwe13_vtbl_thunk_8239E020", size = 0x10 }  # base 0x8239E020 (shift)
+0x8239E690 = { name = "wwe13_vtbl_thunk_8239E030", size = 0x10 }  # base 0x8239E030 (shift)
+
+0x8239E730 = { name = "wwe13_vtbl_thunk_8239E0D0", size = 0x10 }  # base 0x8239E0D0 (shift)
+0x8239E740 = { name = "wwe13_vtbl_thunk_8239E0E0", size = 0x10 }  # base 0x8239E0E0 (shift)
+0x8239E750 = { name = "wwe13_vtbl_thunk_8239E0F0", size = 0x10 }  # base 0x8239E0F0 (shift)
+
+0x8239E560 = { name = "wwe13_vtbl_thunk_8239DF00", size = 0x10 }  # base 0x8239DF00 (shift)
+0x8239E570 = { name = "wwe13_vtbl_thunk_8239DF10", size = 0x10 }  # base 0x8239DF10 (shift)
+
+0x8239F110 = { name = "wwe13_vtbl_thunk_8239EAB0", size = 0x10 }  # base 0x8239EAB0 (shift)
+
+0x8239ED70 = { name = "wwe13_vtbl_thunk_8239E710", size = 0x10 }  # base 0x8239E710 (shift)
+0x8239ED80 = { name = "wwe13_vtbl_thunk_8239E720", size = 0x10 }  # base 0x8239E720 (shift)
+0x8239ED90 = { name = "wwe13_vtbl_thunk_8239E730", size = 0x10 }  # base 0x8239E730 (shift)
+
+0x8239E5B0 = { name = "wwe13_vtbl_thunk_8239DF50", size = 0x10 }  # base 0x8239DF50 (shift)
+0x8239E5C0 = { name = "wwe13_vtbl_thunk_8239DF60", size = 0x10 }  # base 0x8239DF60 (shift)
+0x8239E5D0 = { name = "wwe13_vtbl_thunk_8239DF70", size = 0x10 }  # base 0x8239DF70 (shift)
+
+0x8239E910 = { name = "wwe13_vtbl_thunk_8239E2B0", size = 0x10 }  # base 0x8239E2B0 (shift)
+0x8239E920 = { name = "wwe13_vtbl_thunk_8239E2C0", size = 0x10 }  # base 0x8239E2C0 (shift)
+
+0x8239EA50 = { name = "wwe13_vtbl_thunk_8239E3F0", size = 0x10 }  # base 0x8239E3F0 (shift)
+0x8239EA60 = { name = "wwe13_vtbl_thunk_8239E400", size = 0x10 }  # base 0x8239E400 (shift)
+0x8239EA70 = { name = "wwe13_vtbl_thunk_8239E410", size = 0x10 }  # base 0x8239E410 (shift)
+
+0x8239EFE0 = { name = "wwe13_vtbl_thunk_8239E980", size = 0x10 }  # base 0x8239E980 (shift)
+0x8239EFF0 = { name = "wwe13_vtbl_thunk_8239E990", size = 0x10 }  # base 0x8239E990 (shift)
+0x8239F000 = { name = "wwe13_vtbl_thunk_8239E9A0", size = 0x10 }  # base 0x8239E9A0 (shift)
+
+0x8239F080 = { name = "wwe13_vtbl_thunk_8239EA20", size = 0x10 }  # base 0x8239EA20 (shift)
+0x8239F090 = { name = "wwe13_vtbl_thunk_8239EA30", size = 0x10 }  # base 0x8239EA30 (shift)
+
+0x8239E770 = { name = "wwe13_vtbl_thunk_8239E110", size = 0x10 }  # base 0x8239E110 (shift)
+0x8239E780 = { name = "wwe13_vtbl_thunk_8239E120", size = 0x10 }  # base 0x8239E120 (shift)
+0x8239E790 = { name = "wwe13_vtbl_thunk_8239E130", size = 0x10 }  # base 0x8239E130 (shift)
+
+0x8239E760 = { name = "wwe13_vtbl_thunk_8239E100", size = 0x10 }  # base 0x8239E100 (shift)
+
+0x8239E7A0 = { name = "wwe13_vtbl_thunk_8239E140", size = 0x10 }  # base 0x8239E140 (shift)
+
+0x8239E7E0 = { name = "wwe13_vtbl_thunk_8239E180", size = 0x10 }  # base 0x8239E180 (shift)
+0x8239E7F0 = { name = "wwe13_vtbl_thunk_8239E190", size = 0x10 }  # base 0x8239E190 (shift)
+0x8239E800 = { name = "wwe13_vtbl_thunk_8239E1A0", size = 0x10 }  # base 0x8239E1A0 (shift)
+
+0x8239E830 = { name = "wwe13_vtbl_thunk_8239E1D0", size = 0x10 }  # base 0x8239E1D0 (shift)
+0x8239E840 = { name = "wwe13_vtbl_thunk_8239E1E0", size = 0x10 }  # base 0x8239E1E0 (shift)
+0x8239E850 = { name = "wwe13_vtbl_thunk_8239E1F0", size = 0x10 }  # base 0x8239E1F0 (shift)
+
+0x8239EC50 = { name = "wwe13_vtbl_thunk_8239E5F0", size = 0x10 }  # base 0x8239E5F0 (shift)
+0x8239EC60 = { name = "wwe13_vtbl_thunk_8239E600", size = 0x10 }  # base 0x8239E600 (shift)
+
+0x82F9A460 = { name = "wwe13_adapter_82F983B8", size = 0x18 }  # base 0x82F983B8 (shift)
+
+0x8239E590 = { name = "wwe13_vtbl_thunk_8239DF30", size = 0x10 }  # base 0x8239DF30 (shift)
+0x8239E5A0 = { name = "wwe13_vtbl_thunk_8239DF40", size = 0x10 }  # base 0x8239DF40 (shift)
+
+0x8239EA80 = { name = "wwe13_vtbl_thunk_8239E420", size = 0x10 }  # base 0x8239E420 (shift)
+0x8239EA90 = { name = "wwe13_vtbl_thunk_8239E430", size = 0x10 }  # base 0x8239E430 (shift)
+0x8239EE20 = { name = "wwe13_vtbl_thunk_8239E7C0", size = 0x10 }  # base 0x8239E7C0 (shift)
+0x8239EE30 = { name = "wwe13_vtbl_thunk_8239E7D0", size = 0x10 }  # base 0x8239E7D0 (shift)
+0x8239E650 = { name = "wwe13_vtbl_thunk_8239DFF0", size = 0x10 }  # base 0x8239DFF0 (shift)
+0x8239E660 = { name = "wwe13_vtbl_thunk_8239E000", size = 0x10 }  # base 0x8239E000 (shift)
+
+0x8239F130 = { name = "wwe13_vtbl_thunk_8239EAD0", size = 0x10 }  # base 0x8239EAD0 (shift)
+0x8239F140 = { name = "wwe13_vtbl_thunk_8239EAE0", size = 0x10 }  # base 0x8239EAE0 (shift)
+0x8239F150 = { name = "wwe13_vtbl_thunk_8239EAF0", size = 0x10 }  # base 0x8239EAF0 (shift)
+0x82F9A420 = { name = "wwe13_adapter_82F98378", size = 0x28 }  # base 0x82F98378 (shift)
+0x8239ED30 = { name = "wwe13_vtbl_thunk_8239E6D0", size = 0x10 }  # base 0x8239E6D0 (shift)
+0x8239ED40 = { name = "wwe13_vtbl_thunk_8239E6E0", size = 0x10 }  # base 0x8239E6E0 (shift)
+
+0x829FE900 = { name = "wwe13_vtbl_thunk_829FC360", size = 0x14 }  # base 0x829FC360 (shift)
+
+0x8239E6B0 = { name = "wwe13_vtbl_thunk_8239E050", size = 0x10 }  # base 0x8239E050 (shift)
+0x8239E6C0 = { name = "wwe13_vtbl_thunk_8239E060", size = 0x10 }  # base 0x8239E060 (shift)
+0x8239E6D0 = { name = "wwe13_vtbl_thunk_8239E070", size = 0x10 }  # base 0x8239E070 (shift)
+
+0x8239EE80 = { name = "wwe13_vtbl_thunk_8239E820", size = 0x10 }  # base 0x8239E820 (shift)
+0x8239EE90 = { name = "wwe13_vtbl_thunk_8239E830", size = 0x10 }  # base 0x8239E830 (shift)
+0x8239EEA0 = { name = "wwe13_vtbl_thunk_8239E840", size = 0x10 }  # base 0x8239E840 (shift)
+
+0x8239E6F0 = { name = "wwe13_vtbl_thunk_8239E090", size = 0x10 }  # base 0x8239E090 (shift)
+0x8239E700 = { name = "wwe13_vtbl_thunk_8239E0A0", size = 0x10 }  # base 0x8239E0A0 (shift)
+0x8239E710 = { name = "wwe13_vtbl_thunk_8239E0B0", size = 0x10 }  # base 0x8239E0B0 (shift)
+
+0x8239E860 = { name = "wwe13_vtbl_thunk_8239E200", size = 0x10 }  # base 0x8239E200 (shift)
+0x8239E870 = { name = "wwe13_vtbl_thunk_8239E210", size = 0x10 }  # base 0x8239E210 (shift)
+0x8239E880 = { name = "wwe13_vtbl_thunk_8239E220", size = 0x10 }  # base 0x8239E220 (shift)
+
+0x8239E5E0 = { name = "wwe13_vtbl_thunk_8239DF80", size = 0x10 }   # entry 70, id 0x0000005E, L2 0x8239DBB0  # base 0x8239DF80 (shift)
+0x8239E600 = { name = "wwe13_vtbl_thunk_8239DFA0", size = 0x10 }   # entry 167, id 0x000000DD, L2 0x823A3AE0  # base 0x8239DFA0 (shift)
+0x8239E610 = { name = "wwe13_vtbl_thunk_8239DFB0", size = 0x10 }   # entry 135, id 0x000000B8, L2 0x8239C920  # base 0x8239DFB0 (shift)
+0x8239E620 = { name = "wwe13_vtbl_thunk_8239DFC0", size = 0x10 }   # entry 105, id 0x00000092, L2 0x82A060F8  # base 0x8239DFC0 (shift)
+0x8239E640 = { name = "wwe13_vtbl_thunk_8239DFE0", size = 0x10 }   # entry 46, id 0x00000044, L2 0x82A060F8  # base 0x8239DFE0 (shift)
+0x8239E6A0 = { name = "wwe13_vtbl_thunk_8239E040", size = 0x10 }   # entry 50, id 0x00000048, L2 0x82A060F8  # base 0x8239E040 (shift)
+0x8239E6E0 = { name = "wwe13_vtbl_thunk_8239E080", size = 0x10 }   # entry 113, id 0x000000A2, L2 0x8239C4E8  # base 0x8239E080 (shift)
+0x8239E7B0 = { name = "wwe13_vtbl_thunk_8239E150", size = 0x10 }   # entry 90, id 0x00000072, L2 0x82A060F8  # base 0x8239E150 (shift)
+0x8239E7C0 = { name = "wwe13_vtbl_thunk_8239E160", size = 0x10 }   # entry 62, id 0x00000056, L2 0x823A1378  # base 0x8239E160 (shift)
+0x8239E7D0 = { name = "wwe13_vtbl_thunk_8239E170", size = 0x10 }   # entry 40, id 0x0000003D, L2 0x823A51E8  # base 0x8239E170 (shift)
+0x8239E820 = { name = "wwe13_vtbl_thunk_8239E1C0", size = 0x10 }   # entry 94, id 0x00000080, L2 0x823A1CB8  # base 0x8239E1C0 (shift)
+0x8239E8C0 = { name = "wwe13_vtbl_thunk_8239E260", size = 0x10 }   # entry 165, id 0x000000DB, L2 0x823A38B0  # base 0x8239E260 (shift)
+0x8239E8D0 = { name = "wwe13_vtbl_thunk_8239E270", size = 0x10 }   # entry 132, id 0x000000B5, L2 0x823A28A8  # base 0x8239E270 (shift)
+0x8239E8E0 = { name = "wwe13_vtbl_thunk_8239E280", size = 0x10 }   # entry 102, id 0x00000088, L2 0x82A060F8  # base 0x8239E280 (shift)
+0x8239E8F0 = { name = "wwe13_vtbl_thunk_8239E290", size = 0x10 }   # entry 71, id 0x0000005F, L2 0x8239DBE8  # base 0x8239E290 (shift)
+0x8239E900 = { name = "wwe13_vtbl_thunk_8239E2A0", size = 0x10 }   # entry 43, id 0x00000041, L2 0x82A060F8  # base 0x8239E2A0 (shift)
+0x8239E940 = { name = "wwe13_vtbl_thunk_8239E2E0", size = 0x10 }   # entry 106, id 0x00000093, L2 0x82A060F8  # base 0x8239E2E0 (shift)
+0x8239E960 = { name = "wwe13_vtbl_thunk_8239E300", size = 0x10 }   # entry 47, id 0x00000045, L2 0x82A060F8  # base 0x8239E300 (shift)
+0x8239E970 = { name = "wwe13_vtbl_thunk_8239E310", size = 0x10 }   # entry 16, id 0x00000011, L2 0x82A060F8  # base 0x8239E310 (shift)
+0x8239E980 = { name = "wwe13_vtbl_thunk_8239E320", size = 0x10 }   # entry 172, id 0x000000E2, L2 0x823A3E80  # base 0x8239E320 (shift)
+0x8239E990 = { name = "wwe13_vtbl_thunk_8239E330", size = 0x10 }   # entry 141, id 0x000000C3, L2 0x823A2C20  # base 0x8239E330 (shift)
+0x8239E9A0 = { name = "wwe13_vtbl_thunk_8239E340", size = 0x10 }   # entry 110, id 0x00000097, L2 0x82A060F8  # base 0x8239E340 (shift)
+0x8239E9B0 = { name = "wwe13_vtbl_thunk_8239E350", size = 0x10 }   # entry 79, id 0x00000067, L2 0x8239D700  # base 0x8239E350 (shift)
+0x8239E9D0 = { name = "wwe13_vtbl_thunk_8239E370", size = 0x10 }   # entry 20, id 0x00000017, L2 0x8239CE30  # base 0x8239E370 (shift)
+
+0x8239EB70 = { name = "wwe13_vtbl_thunk_8239E510", size = 0x10 }   # captured (armC), vtable+0x40  # base 0x8239E510 (shift)
+0x8239EB80 = { name = "wwe13_vtbl_thunk_8239E520", size = 0x10 }   # next neighbor, vtable+0x338  # base 0x8239E520 (shift)
+0x8239ECD0 = { name = "wwe13_vtbl_thunk_8239E670", size = 0x10 }   # prev neighbor, vtable+0x1F4  # base 0x8239E670 (shift)
+0x8239ECE0 = { name = "wwe13_vtbl_thunk_8239E680", size = 0x10 }   # captured (armA), vtable+0x178  # base 0x8239E680 (shift)
+
+0x822E99C8 = { name = "wwe13_vtbl_thunk_822E99D8", size = 0x10 }  # base 0x822E99D8 (search-semantic)
+0x8239E9E0 = { name = "wwe13_vtbl_thunk_8239E380", size = 0x10 }  # base 0x8239E380 (shift)
+0x8239E9F0 = { name = "wwe13_vtbl_thunk_8239E390", size = 0x10 }  # base 0x8239E390 (shift)
+0x8239EA00 = { name = "wwe13_vtbl_thunk_8239E3A0", size = 0x10 }  # base 0x8239E3A0 (shift)
+0x8239EA10 = { name = "wwe13_vtbl_thunk_8239E3B0", size = 0x10 }  # base 0x8239E3B0 (shift)
+0x8239EA30 = { name = "wwe13_vtbl_thunk_8239E3D0", size = 0x10 }  # base 0x8239E3D0 (shift)
+0x8239EA40 = { name = "wwe13_vtbl_thunk_8239E3E0", size = 0x10 }  # base 0x8239E3E0 (shift)
+0x8239EAA0 = { name = "wwe13_vtbl_thunk_8239E440", size = 0x10 }  # base 0x8239E440 (shift)
+0x8239EAB0 = { name = "wwe13_vtbl_thunk_8239E450", size = 0x10 }  # base 0x8239E450 (shift)
+0x8239EAC0 = { name = "wwe13_vtbl_thunk_8239E460", size = 0x10 }  # base 0x8239E460 (shift)
+0x8239EAD0 = { name = "wwe13_vtbl_thunk_8239E470", size = 0x10 }  # base 0x8239E470 (shift)
+0x8239EB30 = { name = "wwe13_vtbl_thunk_8239E4D0", size = 0x10 }  # base 0x8239E4D0 (shift)
+0x8239EB40 = { name = "wwe13_vtbl_thunk_8239E4E0", size = 0x10 }  # base 0x8239E4E0 (shift)
+0x8239EB50 = { name = "wwe13_vtbl_thunk_8239E4F0", size = 0x10 }  # base 0x8239E4F0 (shift)
+0x8239EBC0 = { name = "wwe13_vtbl_thunk_8239E560", size = 0x10 }  # base 0x8239E560 (shift)
+0x8239EBE0 = { name = "wwe13_vtbl_thunk_8239E580", size = 0x10 }  # base 0x8239E580 (shift)
+0x8239EBF0 = { name = "wwe13_vtbl_thunk_8239E590", size = 0x10 }  # base 0x8239E590 (shift)
+0x8239EC00 = { name = "wwe13_vtbl_thunk_8239E5A0", size = 0x10 }  # base 0x8239E5A0 (shift)
+0x8239EC40 = { name = "wwe13_vtbl_thunk_8239E5E0", size = 0x10 }  # base 0x8239E5E0 (shift)
+0x8239EC80 = { name = "wwe13_vtbl_thunk_8239E620", size = 0x10 }  # base 0x8239E620 (shift)
+0x8239EC90 = { name = "wwe13_vtbl_thunk_8239E630", size = 0x10 }  # base 0x8239E630 (shift)
+0x8239ECA0 = { name = "wwe13_vtbl_thunk_8239E640", size = 0x10 }  # base 0x8239E640 (shift)
+0x8239ECB0 = { name = "wwe13_vtbl_thunk_8239E650", size = 0x10 }  # base 0x8239E650 (shift)
+0x8239ED00 = { name = "wwe13_vtbl_thunk_8239E6A0", size = 0x10 }  # base 0x8239E6A0 (shift)
+0x8239ED10 = { name = "wwe13_vtbl_thunk_8239E6B0", size = 0x10 }  # base 0x8239E6B0 (shift)
+0x8239ED60 = { name = "wwe13_vtbl_thunk_8239E700", size = 0x10 }  # base 0x8239E700 (shift)
+0x8239EDA0 = { name = "wwe13_vtbl_thunk_8239E740", size = 0x10 }  # base 0x8239E740 (shift)
+0x8239EDB0 = { name = "wwe13_vtbl_thunk_8239E750", size = 0x10 }  # base 0x8239E750 (shift)
+0x8239EDC0 = { name = "wwe13_vtbl_thunk_8239E760", size = 0x10 }  # base 0x8239E760 (shift)
+0x8239EDD0 = { name = "wwe13_vtbl_thunk_8239E770", size = 0x10 }  # base 0x8239E770 (shift)
+0x8239EE00 = { name = "wwe13_vtbl_thunk_8239E7A0", size = 0x10 }  # base 0x8239E7A0 (shift)
+0x8239EE40 = { name = "wwe13_vtbl_thunk_8239E7E0", size = 0x10 }  # base 0x8239E7E0 (shift)
+0x8239EE60 = { name = "wwe13_vtbl_thunk_8239E800", size = 0x10 }  # base 0x8239E800 (shift)
+0x8239EE70 = { name = "wwe13_vtbl_thunk_8239E810", size = 0x10 }  # base 0x8239E810 (shift)
+0x8239EEB0 = { name = "wwe13_vtbl_thunk_8239E850", size = 0x10 }  # base 0x8239E850 (shift)
+0x8239EEC0 = { name = "wwe13_vtbl_thunk_8239E860", size = 0x10 }  # base 0x8239E860 (shift)
+0x8239EED0 = { name = "wwe13_vtbl_thunk_8239E870", size = 0x10 }  # base 0x8239E870 (shift)
+0x8239EEE0 = { name = "wwe13_vtbl_thunk_8239E880", size = 0x10 }  # base 0x8239E880 (shift)
+0x8239EEF0 = { name = "wwe13_vtbl_thunk_8239E890", size = 0x10 }  # base 0x8239E890 (shift)
+0x8239EF00 = { name = "wwe13_vtbl_thunk_8239E8A0", size = 0x10 }  # base 0x8239E8A0 (shift)
+0x8239EF20 = { name = "wwe13_vtbl_thunk_8239E8C0", size = 0x10 }  # base 0x8239E8C0 (shift)
+0x8239EF30 = { name = "wwe13_vtbl_thunk_8239E8D0", size = 0x10 }  # base 0x8239E8D0 (shift)
+0x8239EF50 = { name = "wwe13_vtbl_thunk_8239E8F0", size = 0x10 }  # base 0x8239E8F0 (shift)
+0x8239EF70 = { name = "wwe13_vtbl_thunk_8239E910", size = 0x10 }  # base 0x8239E910 (shift)
+0x8239EF80 = { name = "wwe13_vtbl_thunk_8239E920", size = 0x10 }  # base 0x8239E920 (shift)
+0x8239EFA0 = { name = "wwe13_vtbl_thunk_8239E940", size = 0x10 }  # base 0x8239E940 (shift)
+0x8239EFB0 = { name = "wwe13_vtbl_thunk_8239E950", size = 0x10 }  # base 0x8239E950 (shift)
+0x8239EFC0 = { name = "wwe13_vtbl_thunk_8239E960", size = 0x10 }  # base 0x8239E960 (shift)
+0x8239EFD0 = { name = "wwe13_vtbl_thunk_8239E970", size = 0x10 }  # base 0x8239E970 (shift)
+0x8239F010 = { name = "wwe13_vtbl_thunk_8239E9B0", size = 0x10 }  # base 0x8239E9B0 (shift)
+0x8239F020 = { name = "wwe13_vtbl_thunk_8239E9C0", size = 0x10 }  # base 0x8239E9C0 (shift)
+0x8239F030 = { name = "wwe13_vtbl_thunk_8239E9D0", size = 0x10 }  # base 0x8239E9D0 (shift)
+0x8239F060 = { name = "wwe13_vtbl_thunk_8239EA00", size = 0x10 }  # base 0x8239EA00 (shift)
+0x8239F0B0 = { name = "wwe13_vtbl_thunk_8239EA50", size = 0x10 }  # base 0x8239EA50 (shift)
+0x8239F0C0 = { name = "wwe13_vtbl_thunk_8239EA60", size = 0x10 }  # base 0x8239EA60 (shift)
+0x8239F0D0 = { name = "wwe13_vtbl_thunk_8239EA70", size = 0x10 }  # base 0x8239EA70 (shift)
+0x8239F0F0 = { name = "wwe13_vtbl_thunk_8239EA90", size = 0x10 }  # base 0x8239EA90 (shift)
+
+0x82216168 = { name = "wwe13_gapfn_82216280", size = 0x14 }   # blr gap-start; 3D608341 816B8068 314BFFFF 7C6A5910 4E800020  # base 0x82216280 (search-semantic)
+0x82244BF0 = { name = "wwe13_gapfn_82244D40", size = 0xC }   # b gap-start; 39600005 916301E0 4BFDAEC0 tail=0x8221FC08  # base 0x82244D40 (search-semantic)
+0x822486C8 = { name = "wwe13_gapfn_822487D8", size = 0x8 }   # blr gap-start; 806301BC 4E800020  # base 0x822487D8 (shift)
+0x822486E0 = { name = "wwe13_gapfn_822487F0", size = 0x8 }   # b gap-start; 3863FFE4 4800003C tail=0x82248830  # base 0x822487F0 (shift)
+0x82254A28 = { name = "wwe13_gapfn_82254B18", size = 0x38 }   # blr gap-start; 81230228 39400014 396301CC 39290068 396BFFFC 912301C0 3920FFFF 7D4903A6  # base 0x82254B18 (shift)
+0x822CD3A8 = { name = "wwe13_gapfn_822CD370", size = 0x8 }   # b gap-start; 3863FFF0 48000004 tail=0x822CD378  # base 0x822CD370 (shift)
+0x8234F7C0 = { name = "wwe13_gapfn_8234F218", size = 0x4 }   # b gap-start; 48761510 tail=0x82AB0728  # base 0x8234F218 (search-semantic)
+0x823B2258 = { name = "wwe13_gapfn_823B1B88", size = 0x10 }   # bctr gap-start; 81630000 814B0094 7D4903A6 4E800420  # base 0x823B1B88 (shift)
+0x823B2268 = { name = "wwe13_gapfn_823B1B98", size = 0x10 }   # bctr after-return; 81630000 814B0098 7D4903A6 4E800420  # base 0x823B1B98 (shift)
+0x82453EE0 = { name = "wwe13_gapfn_82453760", size = 0x18 }   # b gap-start; 3D608205 C1A3000C 80630004 C00B139C EC2D0032 4BF8286C tail=0x823D5FE0  # base 0x82453760 (shift)
+0x826FE640 = { name = "wwe13_gapfn_826FC6B8", size = 0xD0 }   # blr gap-start; 81430004 3D208210 39600000 810A0020 C1A99B38 FC006890 81480B04 394A0340  # base 0x826FC6B8 (shift)
+0x827AB7F8 = { name = "wwe13_gapfn_827A96D8", size = 0x10 }   # bctr gap-start; 81630000 814B0084 7D4903A6 4E800420  # base 0x827A96D8 (shift)
+0x827D4A98 = { name = "wwe13_gapfn_827D28C0", size = 0x18 }   # bctr gap-start; 81430000 39600001 916300E8 812A0014 7D2903A6 4E800420  # base 0x827D28C0 (shift)
+0x827D4AB0 = { name = "wwe13_gapfn_827D28D8", size = 0x8 }   # b after-return; 386300FC 4BB93E3C tail=0x82366718  # base 0x827D28D8 (shift)
+0x827DDFE0 = { name = "wwe13_gapfn_827DBE68", size = 0x14 }   # bctr gap-start; 80630284 81630000 814B0004 7D4903A6 4E800420  # base 0x827DBE68 (shift)
+0x827E9F70 = { name = "wwe13_gapfn_827E7CF0", size = 0x34 }   # bctr gap-start; 39400000 8163010C 91430108 3863001C 2F0B0000 81630000 409A0010 814B0014  # base 0x827E7CF0 (search-semantic)
+0x82816A98 = { name = "wwe13_gapfn_82814920", size = 0x8 }   # b gap-start; 3863FFE4 48000104 tail=0x82814A28  # base 0x82814920 (search-semantic)
+0x82821E20 = { name = "wwe13_gapfn_8281FC58", size = 0x14 }   # bctr gap-start; 81630000 38800000 814B0034 7D4903A6 4E800420  # base 0x8281FC58 (shift)
+0x82845B10 = { name = "wwe13_gapfn_82843918", size = 0x10 }   # b after-return; 81630104 806B0008 80830D48 4BFFFD5C tail=0x82843680  # base 0x82843918 (shift)
+0x82879768 = { name = "wwe13_gapfn_828775D0", size = 0x38 }   # blr gap-start; 81630300 38600000 2F0B0005 419A0024 2F0B000F 419A001C 2F0B0021 419A0014  # base 0x828775D0 (search-semantic)
+0x82899CA8 = { name = "wwe13_gapfn_82897B28", size = 0x10 }   # bctr gap-start; 81630000 816B0018 7D6903A6 4E800420  # base 0x82897B28 (shift)
+0x82899CB8 = { name = "wwe13_gapfn_82897B38", size = 0x34 }   # blr after-return; 81430054 7D245396 0CCA0000 7D645397 0CCA0000 7D4951D6 7D4A2050 41820008  # base 0x82897B38 (shift)
+0x828B4A50 = { name = "wwe13_gapfn_828B2900", size = 0x14 }   # blr gap-start; 3D600000 39400001 616B981C 7D43592E 4E800020  # base 0x828B2900 (shift)
+0x828B7F48 = { name = "wwe13_gapfn_828B5DF8", size = 0x10 }   # b gap-start; 38A00000 38800001 38630114 4BA796CC tail=0x8232F4D0  # base 0x828B5DF8 (shift)
+0x828BBEC0 = { name = "wwe13_gapfn_828B9DB0", size = 0x10 }   # bctr gap-start; 81630000 816B002C 7D6903A6 4E800420  # base 0x828B9DB0 (shift)
+0x828DC1D0 = { name = "wwe13_gapfn_828DA010", size = 0x4 }   # b gap-start; 4BADA6A8 tail=0x823B46B8  # base 0x828DA010 (search-semantic)
+0x82962F78 = { name = "wwe13_gapfn_82960BB8", size = 0x8 }   # b gap-start; 3863FFE4 4800066C tail=0x82961228  # base 0x82960BB8 (search-semantic)
+0x829B7A50 = { name = "wwe13_gapfn_829B55D0", size = 0x10 }   # blr gap-start; 3D60835B 816BE970 806B0004 4E800020  # base 0x829B55D0 (shift)
+0x82A2A3C8 = { name = "wwe13_gapfn_82A27890", size = 0xC }   # b gap-start; 80840004 38A00002 4BFFF9C8 tail=0x82A27260  # base 0x82A27890 (shift)
+0x82A2B1B8 = { name = "wwe13_gapfn_82A28680", size = 0xC }   # b gap-start; 80840004 38A00002 4BFFF890 tail=0x82A27F18  # base 0x82A28680 (shift)
+0x82A2BB40 = { name = "wwe13_gapfn_82A29008", size = 0xC }   # b gap-start; 80840004 38A00002 4BFFF938 tail=0x82A28948  # base 0x82A29008 (shift)
+0x82A2C550 = { name = "wwe13_gapfn_82A29A18", size = 0xC }   # b gap-start; 80840004 38A00002 4BFFF8F0 tail=0x82A29310  # base 0x82A29A18 (shift)
+0x82A2D2E8 = { name = "wwe13_gapfn_82A2A790", size = 0xC }   # b gap-start; 80840004 38A00002 4BFFF500 tail=0x82A29C98  # base 0x82A2A790 (shift)
+0x82AB7490 = { name = "wwe13_gapfn_82AB4C98", size = 0x20 }   # bctr gap-start; 81630000 7CE83B78 7CC73378 7CA62B78 38A00400 814B00B0 7D4903A6 4E800420  # base 0x82AB4C98 (shift)
+0x82EC4D00 = { name = "wwe13_gapfn_82EC2528", size = 0x1C }   # bctr gap; data-ptr (job queue vtable +0x24, runtime-built); 89650001 7C6A1B78 392B0011 55282036 7CE8182E 7CE903A6 4E800420  # base 0x82EC2528 (shift)
+0x831112B0 = { name = "wwe13_gapfn_8310EB10", size = 0x4 }   # b gap-start; 4BFF0508 tail=0x830FF018  # base 0x8310EB10 (search-semantic)
+0x83197CE8 = { name = "wwe13_gapfn_831952A0", size = 0x8 }   # b gap-start; 3863FFF8 4BFFDCF4 tail=0x83192F98  # base 0x831952A0 (shift)
+0x8319A270 = { name = "wwe13_gapfn_831977D0", size = 0x8 }   # b gap-start; 3863FFFC 4BFFED7C tail=0x83196550  # base 0x831977D0 (search-semantic)
+0x8319F418 = { name = "wwe13_gapfn_8319C8A0", size = 0x8 }   # b gap-start; 3863FFFC 4BFFFFAC tail=0x8319C850  # base 0x8319C8A0 (search-semantic)
+0x8319F438 = { name = "wwe13_gapfn_8319C8A8", size = 0x8 }   # b after-return; 3863FFFC 4BFFFF9C tail=0x8319C848  # base 0x8319C8A8 (search-semantic)
+0x8319F428 = { name = "wwe13_gapfn_8319C8B0", size = 0x8 }   # b after-return; 3863FFFC 4BFFFFB4 tail=0x8319C868  # base 0x8319C8B0 (search-semantic)
+0x8319F408 = { name = "wwe13_gapfn_8319C8C8", size = 0x8 }   # b gap-start; 3863FFFC 4BFFFFB4 tail=0x8319C880  # base 0x8319C8C8 (search-semantic)
+0x831A0818 = { name = "wwe13_gapfn_8319C8D0", size = 0x8 }   # b after-return; 3863FFFC 4BFFADC4 tail=0x83197698  # base 0x8319C8D0 (search-semantic)
+0x831A0810 = { name = "wwe13_gapfn_8319DC70", size = 0x8 }   # b gap-start; 3863FFFC 4BFFFFDC tail=0x8319DC50  # base 0x8319DC70 (search-semantic)
+0x831A07E8 = { name = "wwe13_gapfn_8319DC78", size = 0x8 }   # b after-return; 3863FFFC 4BFFFFAC tail=0x8319DC28  # base 0x8319DC78 (search-semantic)
+0x831A0800 = { name = "wwe13_gapfn_8319DC80", size = 0x8 }   # b after-return; 3863FFFC 4BFFFFC4 tail=0x8319DC48  # base 0x8319DC80 (search-semantic)
+0x831A0820 = { name = "wwe13_gapfn_8319DC88", size = 0x8 }   # b after-return; 3863FFFC 4BFFFFA4 tail=0x8319DC30  # base 0x8319DC88 (search-semantic)
+0x8319F448 = { name = "wwe13_gapfn_8319DC90", size = 0x8 }   # b after-return; 3863FFFC 4BFFFFA4 tail=0x8319DC38  # base 0x8319DC90 (search-semantic)
+0x831A0808 = { name = "wwe13_gapfn_8319DC98", size = 0x8 }   # b after-return; 3863FFFC 4BFFFF84 tail=0x8319DC20  # base 0x8319DC98 (search-semantic)
+0x8319F410 = { name = "wwe13_gapfn_8319DCA0", size = 0x8 }   # b after-return; 3863FFFC 4BFFEBBC tail=0x8319C860  # base 0x8319DCA0 (search-semantic)
+0x831A07F8 = { name = "wwe13_gapfn_8319DCB0", size = 0x8 }   # b after-return; 3863FFFC 4BFFFFA4 tail=0x8319DC58  # base 0x8319DCB0 (search-semantic)
+0x8319F440 = { name = "wwe13_gapfn_8319DCB8", size = 0x8 }   # b after-return; 3863FFFC 4BFFEB9C tail=0x8319C858  # base 0x8319DCB8 (search-semantic)
+0x831A0828 = { name = "wwe13_gapfn_8319DCC0", size = 0xFC }   # bctr after-return; 7C6B1B78 810300A8 38600000 2B080000 808B004C 419A0008 38840001 812B0058  # base 0x8319DCC0 (search-semantic)
+0x831A1DF0 = { name = "wwe13_gapfn_8319F110", size = 0x8 }   # b gap-start; 3863FFF0 4BFFF0CC tail=0x8319E1E0  # base 0x8319F110 (shift)
+0x831B3890 = { name = "wwe13_gapfn_831B0D40", size = 0x8 }   # b gap-start; 3863FFFC 4BFFFDB4 tail=0x831B0AF8  # base 0x831B0D40 (search-semantic)
+0x831B3880 = { name = "wwe13_gapfn_831B0D48", size = 0x8 }   # b after-return; 3863FFFC 4BFFFE8C tail=0x831B0BD8  # base 0x831B0D48 (shift)
+0x831B5098 = { name = "wwe13_gapfn_831B26B8", size = 0x8 }   # b gap-start; 3863FFFC 4BFFFF44 tail=0x831B2600  # base 0x831B26B8 (search-semantic)
+0x8326E6A8 = { name = "wwe13_gapfn_8326BE40", size = 0x8 }   # blr gap-start; 88630090 4E800020  # base 0x8326BE40 (shift)
+
+0x82205C24 = { name = "wwe13_tu_gap_82205C24", size = 0x10 } # gap-functions.tsv:2 end=b, ptr=1; 7D084378 7D084378 7D084378 48000010
+0x82205C40 = { name = "wwe13_tu_gap_82205C40", size = 0x18 } # gap-functions.tsv:3 end=b, ptr=1; 7D084378 399F0140 48000031 807F0164 383F0140 4895B190
+0x822552F0 = { name = "wwe13_tu_gap_822552F0", size = 0x58 } # gap-functions.tsv:4 end=bctr, ptr=1; 81630024 38E00001 81030014 39400000 5569103A 80C301B4 38A00005 90E301AC
+0x8239F160 = { name = "wwe13_tu_gap_8239F160", size = 0x10 } # gap-functions.tsv:5 end=bctr, ptr=1; 81830000 816C00B4 7D6903A6 4E800420
+0x8239F170 = { name = "wwe13_tu_gap_8239F170", size = 0x10 } # gap-functions.tsv:6 end=bctr, ptr=1; 81830000 816C0038 7D6903A6 4E800420
+0x823B2278 = { name = "wwe13_tu_gap_823B2278", size = 0x10 } # gap-functions.tsv:7 end=bctr, ptr=4; 81630000 814B0098 7D4903A6 4E800420
+0x823B2288 = { name = "wwe13_tu_gap_823B2288", size = 0x10 } # gap-functions.tsv:8 end=bctr, ptr=16; 81630000 814B0150 7D4903A6 4E800420
+0x823D0000 = { name = "wwe13_tu_gap_823D0000", size = 0xC } # gap-functions.tsv:9 end=blr, code-ref=1 at 0x823DE014; 7D6A0034 5543DFFE 4E800020
+0x823D0060 = { name = "wwe13_tu_gap_823D0060", size = 0xC } # gap-functions.tsv:10 end=blr, code-ref=2 at 0x823DDE14,0x823DDF04; 7D6A0034 5543DFFE 4E800020
+0x8273C698 = { name = "wwe13_tu_gap_8273C698", size = 0x38 } # gap-functions.tsv:11 end=b, ptr=1; 409A0030 397C0051 557F103A 7C7FF02E 2B030000 419A0018 81630000 38800001
+0x827C71B0 = { name = "wwe13_tu_gap_827C71B0", size = 0x1C } # gap-functions.tsv:12 end=blr, ptr=1; 7C6B1B78 81430014 38600001 812B0024 914B015C 912B0160 4E800020
+0x827EA468 = { name = "wwe13_tu_gap_827EA468", size = 0x4 } # gap-functions.tsv:13 end=b, ptr=1; 4BFBE990
+0x82BE3680 = { name = "wwe13_tu_gap_82BE3680", size = 0x10 } # gap-functions.tsv:14 end=b, code-ref=1 at 0x82BE47A8; 3D608209 396BCF80 102058C3 4BFFFE1C
+0x82BE3690 = { name = "wwe13_tu_gap_82BE3690", size = 0x74 } # gap-functions.tsv:15 end=blr, code-ref=1 at 0x82BE47B4; 3961FFF0 13E01C07 3D408209 1BC00774 39200000 394ACF80 9121FFF0 3D208209
+0x82E7B170 = { name = "wwe13_tu_gap_82E7B170", size = 0x18 } # gap-functions.tsv:16 end=blr, code-ref=1 at 0x82E7B63C; A1630004 A1440004 7D2A5810 7CE84110 54E307FE 4E800020
+0x82F9A478 = { name = "wwe13_tu_gap_82F9A478", size = 0x18 } # gap-functions.tsv:17 end=bctr, code-ref=1 at 0x82F9A5E4; 80640000 7CA42B78 81630000 814B002C 7D4903A6 4E800420
+0x82F9A490 = { name = "wwe13_tu_gap_82F9A490", size = 0x18 } # gap-functions.tsv:18 end=bctr, code-ref=1 at 0x82F9A5DC; 80640000 7CA42B78 81630000 814B0030 7D4903A6 4E800420
+0x82F9A4A8 = { name = "wwe13_tu_gap_82F9A4A8", size = 0x18 } # gap-functions.tsv:19 end=bctr, code-ref=1 at 0x82F9A5E0; 80640000 7CA42B78 81630000 814B0034 7D4903A6 4E800420
+0x83103D98 = { name = "wwe13_tu_gap_83103D98", size = 0x8 } # gap-functions.tsv:20 end=b, ptr=1; 3863FFE4 4800000C
+0x8319A208 = { name = "wwe13_tu_gap_8319A208", size = 0x8 } # gap-functions.tsv:21 end=b, ptr=5; 3863FFFC 4BFFFF34
+0x8319A210 = { name = "wwe13_tu_gap_8319A210", size = 0x8 } # gap-functions.tsv:22 end=b, ptr=5; 3863FFFC 4BFFFF24
+0x8319A218 = { name = "wwe13_tu_gap_8319A218", size = 0x58 } # gap-functions.tsv:23 end=bctr, ptr=3; 8163004C 814300A8 388B0001 2B0A0000 419A0008 38840001 81630058 2F0B0000
+0x8319F430 = { name = "wwe13_tu_gap_8319F430", size = 0x8 } # gap-functions.tsv:24 end=b, ptr=2; 3863FFFC 4BFFFFA4
+0x831A07F0 = { name = "wwe13_tu_gap_831A07F0", size = 0x8 } # gap-functions.tsv:25 end=b, ptr=1; 3863FFFC 4800018C
+0x831A2B20 = { name = "wwe13_tu_gap_831A2B20", size = 0x8 } # gap-functions.tsv:26 end=b, ptr=1; 3863FFDC 48000BEC
+0x831A2B28 = { name = "wwe13_tu_gap_831A2B28", size = 0x8 } # gap-functions.tsv:27 end=b, ptr=1; 3863FFE0 4BFFFE2C
+0x831B3878 = { name = "wwe13_tu_gap_831B3878", size = 0x8 } # gap-functions.tsv:28 end=b, ptr=1; 3863FFFC 4BFFFD4C
+0x831B5078 = { name = "wwe13_tu_gap_831B5078", size = 0x8 } # gap-functions.tsv:29 end=b, ptr=1; 3863FFFC 48000024
+0x831B5088 = { name = "wwe13_tu_gap_831B5088", size = 0x8 } # gap-functions.tsv:30 end=b, ptr=2; 3863FFFC 4B5719EC
+
+0x829C0C80 = { name = "wwe13_tu_gap_829C0C80", size = 0x18 } # gap-functions-condtail.tsv:1 end=blr, ptr=2; 2B040000 419A0014 396300E8 38600000 91640000 4E800020
+0x8328D480 = { name = "wwe13_tu_gap_8328D480", size = 0x9C } # switch with case blocks through 0x8328D518 (gap-functions-condtail.tsv:2)
+0x8328C3D0 = { name = "wwe13_tu_gap_8328C3D0", size = 0x178 } # fallthrough into switch dispatcher; jump table 0x8328C410; vtable 0x82170BB0; twin of 0x8328D480
+0x827B26C0 = { name = "wwe13_tu_gap_827B26C0", size = 0x44 } # gap-functions-condtail.tsv:3 end=blr, ptr=1; 81430204 3963FFE4 2B0A000A 4198000C 39600000 48000018 394A0434 5549103A; Universe match-card Edit crash 2026-09-26
+0x831A5A38 = { name = "wwe13_tu_gap_831A5A38", size = 0x2C } # gap-functions-condtail.tsv:4 end=b, ptr=1; A1630028 81430034 0CCB0000 7D6A5B96 7F045840 40990018 7CAB2050 A0830024
+0x8326BD18 = { name = "wwe13_tu_gap_8326BD18", size = 0x24 } # gap-functions-condtail.tsv:5 end=blr, ptr=1; 8963003A 556A06F6 2B0A0000 409A0018 556B0036 2B0B0000 419A000C 38600000
+0x823038E0 = { name = "wwe13_tu_gap_823038E0", size = 0x18 } # gap-functions-condtail.tsv:6 end=b, ptr=1; 3D60835B 806BE6F0 2B030000 419A000C 38800000 484381E4
+0x827AAAD8 = { name = "wwe13_tu_gap_827AAAD8", size = 0x14 } # gap-functions-condtail.tsv:7 end=blr, ptr=1; 8163011C 2B0B0000 409A000C 38600000 4E800020
+0x828BAAF8 = { name = "wwe13_tu_gap_828BAAF8", size = 0x10 } # gap-functions-condtail.tsv:8 end=b, ptr=1; 81630308 2B0B0003 41980008 4BF9E55C
+
+0x82287BC0 = { name = "wwe13_tu_tail_82287BC0", size = 0x18 } # row 33 exact, end=bctr; 3D808228 5560103A 398C7BD8 7C0C002E 7C0903A6 4E800420
+0x8232F0CC = { name = "wwe13_tu_tail_8232F0CC", size = 0x18 } # row 42 exact, end=bctr; 554B003E 386B01B0 816B01B0 814B0008 7D4903A6 4E800420
+0x823F3E78 = { name = "wwe13_tu_tail_823F3E78", size = 0x18 } # row 62 exact, end=bctr; 3D80823F 5560103A 398C3E90 7C0C002E 7C0903A6 4E800420
+0x82461404 = { name = "wwe13_tu_tail_82461404", size = 0x10 } # row 63 exact, end=bctr; 398C1414 7C0C002E 7C0903A6 4E800420
+0x824614F4 = { name = "wwe13_tu_tail_824614F4", size = 0x18 } # row 64 exact, end=bctr; 3D808246 5560103A 398C150C 7C0C002E 7C0903A6 4E800420
+0x824CB32C = { name = "wwe13_tu_tail_824CB32C", size = 0x18 } # row 65 exact, end=bctr; 3D80824D 5560103A 398CB344 7C0C002E 7C0903A6 4E800420
+0x82792908 = { name = "wwe13_tu_vtbl_thunk_82792908", size = 0x10 } # final-swallowed-thunks.tsv:7 ptr=1, after blr; end=bctr; 81630000 814B0018 7D4903A6 4E800420
+0x827FBA30 = { name = "wwe13_tu_tail_827FBA30", size = 0x10 } # row 94 exact, end=bctr; 81630000 814B0020 7D4903A6 4E800420
+0x827FBABC = { name = "wwe13_tu_tail_827FBABC", size = 0x10 } # row 95 exact, end=bctr; 81630000 814B0020 7D4903A6 4E800420
+0x82831EB4 = { name = "wwe13_tu_tail_82831EB4", size = 0x10 } # row 98 exact, end=bctr; 81630000 814B0184 7D4903A6 4E800420
+0x82831EC4 = { name = "wwe13_tu_tail_82831EC4", size = 0x10 } # row 99 exact, end=bctr; 81630000 814B0188 7D4903A6 4E800420
+0x82831ED4 = { name = "wwe13_tu_tail_82831ED4", size = 0x10 } # row 100 exact, end=bctr; 81630000 814B018C 7D4903A6 4E800420
+0x82831EF0 = { name = "wwe13_tu_tail_82831EF0", size = 0x10 } # row 101 exact, end=bctr; 81630000 814B0194 7D4903A6 4E800420
+0x82831F00 = { name = "wwe13_tu_tail_82831F00", size = 0x10 } # row 102 exact, end=bctr; 81630000 814B01A0 7D4903A6 4E800420
+0x82831F10 = { name = "wwe13_tu_tail_82831F10", size = 0x10 } # row 103 exact, end=bctr; 81630000 814B0198 7D4903A6 4E800420
+0x828E31B4 = { name = "wwe13_tu_tail_828E31B4", size = 0x18 } # row 104 exact, end=bctr; 3D80828E 5560103A 398C31CC 7C0C002E 7C0903A6 4E800420
+0x82B5BE94 = { name = "wwe13_tu_tail_82B5BE94", size = 0x18 } # row 134 exact, end=bctr; 3D8082B6 5560103A 398CBEAC 7C0C002E 7C0903A6 4E800420
+0x82FA601C = { name = "wwe13_tu_tail_82FA601C", size = 0xC } # row 154 exact, end=bctr; 38830030 7D6903A6 4E800420
+0x82FA60F8 = { name = "wwe13_tu_tail_82FA60F8", size = 0x8 } # row 155 exact, end=bctr; 7D6903A6 4E800420
+
+0x823F4078 = { name = "wwe13_tu_gap_823F4078", size = 0x18 } # end=blr; 38210070 8181FFF8 7D8803A6 EBC1FFE8 EBE1FFF0 4E800020

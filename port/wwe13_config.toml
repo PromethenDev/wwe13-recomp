@@ -1,0 +1,11 @@
+# WWE '13 codegen settings (title 545108B4 with title update 2.0.1.0, the same image as the Xenos build).
+
+# CRT setjmp / longjmp (jmp_buf in r3): replaced by the codegen, otherwise libjpeg's error path runs on
+# every decode (GitHub #12, #17, #18, #23 of the original project).
+setjmp_address = 0x83193DB0
+longjmp_address = 0x83193A90
+
+# wwe13_switch_tables.toml: jump tables the SDK 0.10 codegen sized wrongly (tools/switch_tables_from_old_codegen.py).
+# Functions without .pdata entries, found for the original project (frameless leaves, thunks, vtable
+# slots, thread entry points).
+includes = ["../config/functions.toml", "wwe13_switch_tables.toml"]

@@ -1,0 +1,162 @@
+From 8570d3112401be84e6df5caf9c0272dd8d7d9b96 Mon Sep 17 00:00:00 2001
+From: PromethenDev <PromethenDev@users.noreply.github.com>
+Date: Mon, 5 Oct 2026 16:08:41 -0700
+Subject: [PATCH 92/93] GitHub #13: startup crash (access violation at 0x10)
+ when Vulkan enumeration came back empty on a dual-GPU laptop (Vega iGPU + RTX
+ 2060 waking up). EnumeratePhysicalDevices retries up to 15 x 200 ms on an
+ error or 0 devices (no delay on first-try success);
+ VulkanGraphicsSystem::Setup returns failure on a null provider instead of
+ letting VulkanCommandProcessor dereference it; new
+ ReXApp::OnGraphicsSetupFailed hook. Proof: fake 0-device ICD -> 15 retries
+ over 2.8 s, clean exit 1, no crash report; Wine no-Vulkan -> native message
+ box (Claude viewed); normal Wine gate PASS + Linux title, 0 retry lines
+ (DeepSeek Flash worker, Claude reviewed)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ include/rex/rex_app.h                   |  7 +++
+ src/graphics/vulkan/graphics_system.cpp |  6 +++
+ src/ui/rex_app.cpp                      |  6 +++
+ src/ui/vulkan/vulkan_instance.cpp       | 62 ++++++++++++++++++-------
+ 4 files changed, 65 insertions(+), 16 deletions(-)
+
+diff --git a/include/rex/rex_app.h b/include/rex/rex_app.h
+index 6865a50..483c8cd 100644
+--- a/include/rex/rex_app.h
++++ b/include/rex/rex_app.h
+@@ -91,6 +91,13 @@ class ReXApp : public ui::WindowedApp, public ui::WindowListener, public ui::Win
+   /// Called after runtime is fully initialized, before window creation.
+   virtual void OnPostSetup() {}
+ 
++  /// Called when the runtime failed to initialize because the graphics backend
++  /// could not be set up (for example when no usable graphics device was
++  /// found). The platform entry point has not created a window yet, and the
++  /// application is about to exit. Override to present a player-facing message;
++  /// the failure is logged regardless.
++  virtual void OnGraphicsSetupFailed(X_STATUS status) { (void)status; }
++
+   /// Window title shown to the player. Defaults to the application name.
+   virtual std::string_view GetWindowTitle() const { return GetName(); }
+ 
+diff --git a/src/graphics/vulkan/graphics_system.cpp b/src/graphics/vulkan/graphics_system.cpp
+index df56b10..8ffd01e 100644
+--- a/src/graphics/vulkan/graphics_system.cpp
++++ b/src/graphics/vulkan/graphics_system.cpp
+@@ -28,6 +28,12 @@ X_STATUS VulkanGraphicsSystem::Setup(runtime::FunctionDispatcher* function_dispa
+                                      system::KernelState* kernel_state,
+                                      ui::WindowedAppContext* app_context, bool with_presentation) {
+   provider_ = rex::ui::vulkan::VulkanProvider::Create(true, with_presentation);
++  if (!provider_) {
++    REXLOG_ERROR(
++        "Failed to initialize Vulkan: no usable graphics device was found. The game cannot "
++        "continue without a graphics card.");
++    return X_STATUS_UNSUCCESSFUL;
++  }
+   return GraphicsSystem::Setup(function_dispatcher, kernel_state, app_context, with_presentation);
+ }
+ 
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index 0fb3590..c2f8899 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -168,6 +168,12 @@ bool ReXApp::OnInitialize() {
+                                 ppc_info_.image_size, ppc_info_.func_mappings, std::move(config));
+   if (XFAILED(status)) {
+     REXLOG_ERROR("Runtime setup failed: {:08X}", status);
++    if (!runtime_->graphics_system()) {
++      // The graphics backend could not be initialized (for example no usable
++      // Vulkan device). No window exists yet, so the platform entry point will
++      // just exit; give the app a chance to explain why to the player.
++      OnGraphicsSetupFailed(status);
++    }
+     return false;
+   }
+ 
+diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.cpp
+index 8e2f486..57a43fb 100644
+--- a/src/ui/vulkan/vulkan_instance.cpp
++++ b/src/ui/vulkan/vulkan_instance.cpp
+@@ -9,8 +9,10 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <chrono>
+ #include <sstream>
+ #include <string>
++#include <thread>
+ #include <unordered_map>
+ #include <utility>
+ #include <vector>
+@@ -480,25 +482,53 @@ VulkanInstance::~VulkanInstance() {
+ void VulkanInstance::EnumeratePhysicalDevices(
+     std::vector<VkPhysicalDevice>& physical_devices_out) const {
+   physical_devices_out.clear();
+-  while (true) {
+-    uint32_t physical_device_count = 0;
+-    const VkResult get_physical_device_count_result =
+-        functions_.vkEnumeratePhysicalDevices(instance_, &physical_device_count, nullptr);
+-    if ((get_physical_device_count_result != VK_SUCCESS &&
+-         get_physical_device_count_result != VK_INCOMPLETE) ||
+-        !physical_device_count) {
+-      return;
++  // A GPU that is still waking up (for example the NVIDIA Optimus discrete GPU
++  // on a laptop) can return no devices, or fail, for a moment right after the
++  // instance is created. Retry for a few seconds before giving up. A successful
++  // first attempt returns without any delay.
++  constexpr int kMaxAttempts = 15;
++  constexpr auto kRetryDelay = std::chrono::milliseconds(200);
++  for (int attempt = 0; attempt < kMaxAttempts; ++attempt) {
++    if (attempt) {
++      std::this_thread::sleep_for(kRetryDelay);
+     }
+-    physical_devices_out.resize(physical_device_count);
+-    const VkResult get_physical_devices_result = functions_.vkEnumeratePhysicalDevices(
+-        instance_, &physical_device_count, physical_devices_out.data());
+-    if (get_physical_devices_result == VK_INCOMPLETE) {
+-      continue;
++    VkResult failure_result = VK_SUCCESS;
++    uint32_t failure_count = 0;
++    while (true) {
++      uint32_t physical_device_count = 0;
++      const VkResult get_physical_device_count_result =
++          functions_.vkEnumeratePhysicalDevices(instance_, &physical_device_count, nullptr);
++      if (get_physical_device_count_result != VK_SUCCESS &&
++          get_physical_device_count_result != VK_INCOMPLETE) {
++        failure_result = get_physical_device_count_result;
++        failure_count = physical_device_count;
++        break;
++      }
++      if (!physical_device_count) {
++        // VK_SUCCESS with zero devices: not an error code, but still unusable.
++        failure_result = VK_SUCCESS;
++        failure_count = 0;
++        break;
++      }
++      physical_devices_out.resize(physical_device_count);
++      const VkResult get_physical_devices_result = functions_.vkEnumeratePhysicalDevices(
++          instance_, &physical_device_count, physical_devices_out.data());
++      if (get_physical_devices_result == VK_INCOMPLETE) {
++        continue;
++      }
++      if (get_physical_devices_result != VK_SUCCESS) {
++        failure_result = get_physical_devices_result;
++        failure_count = physical_device_count;
++        break;
++      }
++      physical_devices_out.resize(physical_device_count);
++      return;
+     }
+-    physical_devices_out.resize(get_physical_devices_result == VK_SUCCESS ? physical_device_count
+-                                                                          : 0);
+-    return;
++    REXLOG_WARN(
++        "Vulkan physical device enumeration attempt {}/{} found none (VkResult {}, count {})",
++        attempt + 1, kMaxAttempts, vk::to_string(vk::Result(failure_result)), failure_count);
+   }
++  physical_devices_out.clear();
+ }
+ 
+ VkBool32 VulkanInstance::DebugUtilsMessengerCallback(
+-- 
+2.43.0
+

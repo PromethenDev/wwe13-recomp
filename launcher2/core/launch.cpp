@@ -1,0 +1,551 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#include "launcher_core.h"
+
+#include "internal/util.h"
+
+#include <algorithm>
+#include <thread>
+#include <array>
+#include <chrono>
+#include <cstdlib>
+#include <map>
+#include <cwchar>
+#include <string>
+#include <system_error>
+
+#ifdef _WIN32
+#include <intrin.h>
+#endif
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
+#include <cerrno>
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/file.h>
+#include <sys/wait.h>
+#include <unistd.h>
+extern char** environ;
+#endif
+
+namespace wwe13::launcher {
+namespace {
+
+struct ResolutionParameters {
+  const char* output;
+  const char* internal;
+  unsigned scale;
+};
+
+ResolutionParameters GetResolutionParameters(Resolution resolution) {
+  switch (resolution) {
+    case Resolution::k480p: return {"720p", "480", 0};
+    case Resolution::k576p: return {"720p", "576", 0};
+    case Resolution::k1080p: return {"1080p", "1080", 0};
+    case Resolution::k1440p: return {"720p", nullptr, 2};
+    case Resolution::k360p: return {"720p", "480", 0};      // older build: no 360p
+    case Resolution::k2160p: return {"720p", nullptr, 2};   // older build: up to 1440p
+    case Resolution::k720p: default: return {"720p", nullptr, 0};
+  }
+}
+
+Settings EffectiveSettings(const Settings& source, const std::vector<GpuInfo>& gpus, bool port_build) {
+  Settings effective = source;
+  if (effective.explicit_choice) return effective;
+  std::vector<GpuInfo> recommendation_gpus;
+  if (!source.gpu_id.empty()) {
+    const auto selected = std::find_if(gpus.begin(), gpus.end(), [&](const GpuInfo& gpu) {
+      return gpu.id == source.gpu_id;
+    });
+    if (selected != gpus.end()) recommendation_gpus.push_back(*selected);
+  } else {
+    recommendation_gpus = gpus;
+  }
+  const Settings recommended = RecommendedSettings(recommendation_gpus, port_build).settings;
+  effective.resolution = recommended.resolution;
+  effective.frame_rate = recommended.frame_rate;
+  return effective;
+}
+
+bool ShouldRemoveEnvironment(std::string_view name, std::string_view value) {
+  return value.empty() && (name == "WWE13_INTERNAL_RES" || name == "WWE13_SCENE_AA");
+}
+
+#ifdef _WIN32
+
+std::wstring Wide(std::string_view text) {
+  if (text.empty()) return {};
+  const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+                                         static_cast<int>(text.size()), nullptr, 0);
+  if (length <= 0) return {};
+  std::wstring output(static_cast<size_t>(length), L'\0');
+  MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()),
+                      output.data(), length);
+  return output;
+}
+
+std::wstring LowerWide(std::wstring text) {
+  std::transform(text.begin(), text.end(), text.begin(), [](wchar_t ch) {
+    return ch >= L'A' && ch <= L'Z' ? wchar_t(ch + (L'a' - L'A')) : ch;
+  });
+  return text;
+}
+
+std::wstring QuoteArgument(std::wstring_view argument) {
+  std::wstring result = L"\"";
+  size_t slashes = 0;
+  for (const wchar_t ch : argument) {
+    if (ch == L'\\') {
+      ++slashes;
+    } else if (ch == L'"') {
+      result.append(slashes * 2 + 1, L'\\');
+      result.push_back(L'"');
+      slashes = 0;
+    } else {
+      result.append(slashes, L'\\');
+      slashes = 0;
+      result.push_back(ch);
+    }
+  }
+  result.append(slashes * 2, L'\\');
+  result.push_back(L'"');
+  return result;
+}
+
+std::vector<wchar_t> WindowsEnvironmentBlock(
+    const std::vector<std::pair<std::string, std::string>>& overrides) {
+  std::map<std::wstring, std::wstring> environment;
+  LPWCH block = GetEnvironmentStringsW();
+  if (block) {
+    for (const wchar_t* item = block; *item; item += std::wcslen(item) + 1) {
+      const std::wstring entry(item);
+      const size_t separator = entry.find(L'=', entry.front() == L'=' ? 1 : 0);
+      if (separator != std::wstring::npos) {
+        environment[LowerWide(entry.substr(0, separator))] = entry;
+      }
+    }
+    FreeEnvironmentStringsW(block);
+  }
+  environment.erase(L"wwe13_keep_60");
+  environment.erase(L"wwe13_lock_30");
+  for (const auto& [name_utf8, value_utf8] : overrides) {
+    const std::wstring name = Wide(name_utf8);
+    const std::wstring value = Wide(value_utf8);
+    const std::wstring folded = LowerWide(name);
+    if (ShouldRemoveEnvironment(name_utf8, value_utf8)) {
+      environment.erase(folded);
+    } else {
+      environment[folded] = name + L"=" + value;
+    }
+  }
+  std::vector<wchar_t> output;
+  for (const auto& [folded, entry] : environment) {
+    (void)folded;
+    output.insert(output.end(), entry.begin(), entry.end());
+    output.push_back(L'\0');
+  }
+  output.push_back(L'\0');
+  if (environment.empty()) output.push_back(L'\0');
+  return output;
+}
+
+#else
+
+std::vector<std::string> PosixEnvironment(
+    const std::vector<std::pair<std::string, std::string>>& overrides) {
+  std::map<std::string, std::string> environment;
+  for (char** entry = environ; entry && *entry; ++entry) {
+    const std::string value(*entry);
+    const size_t separator = value.find('=');
+    if (separator != std::string::npos) environment[value.substr(0, separator)] = value.substr(separator + 1);
+  }
+  environment.erase("WWE13_KEEP_60");
+  environment.erase("WWE13_LOCK_30");
+  for (const auto& [name, value] : overrides) {
+    if (ShouldRemoveEnvironment(name, value)) environment.erase(name);
+    else environment[name] = value;
+  }
+  std::vector<std::string> output;
+  output.reserve(environment.size());
+  for (const auto& [name, value] : environment) output.push_back(name + "=" + value);
+  return output;
+}
+
+#endif
+
+}  // namespace
+
+// GitHub #6: single-instance guard keyed on the user-data folder. This mirrors
+// src/single_instance.cpp in the game (same FNV-1a key, same lock name/format),
+// so the launcher can warn before starting (or updating) while a game runs, while
+// leaving parallel test lanes (distinct --user_data_root paths) unaffected.
+bool GameAlreadyRunning(const fs::path& user_data_root) {
+  if (user_data_root.empty()) return false;
+  std::error_code canonical_error;
+  const fs::path canonical = fs::weakly_canonical(user_data_root, canonical_error);
+  std::string text = (canonical_error ? user_data_root : canonical).generic_string();
+#ifdef _WIN32
+  for (char& c : text) {
+    if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
+  }
+#endif
+  uint64_t hash = 1469598103934665603ull;
+  for (unsigned char c : text) {
+    hash ^= c;
+    hash *= 1099511628211ull;
+  }
+  const char* digits = "0123456789abcdef";
+  std::string key;
+  key.reserve(16);
+  for (int i = 15; i >= 0; --i) key.push_back(digits[(hash >> (i * 4)) & 0xF]);
+#ifdef _WIN32
+  std::wstring name = L"Local\\WWE13Recomp-";
+  for (char c : key) name.push_back(static_cast<wchar_t>(c));
+  HANDLE mutex = CreateMutexW(nullptr, FALSE, name.c_str());
+  if (mutex == nullptr) return false;
+  const bool running = GetLastError() == ERROR_ALREADY_EXISTS;
+  CloseHandle(mutex);
+  return running;
+#else
+  const char* runtime_dir = std::getenv("XDG_RUNTIME_DIR");
+  std::string dir = (runtime_dir != nullptr && runtime_dir[0] != '\0') ? runtime_dir : "/tmp";
+  while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
+  const std::string path = dir + "/wwe13-recomp-" + key + ".lock";
+  int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+  if (fd < 0) return false;
+  const bool running = flock(fd, LOCK_EX | LOCK_NB) != 0;
+  if (!running) flock(fd, LOCK_UN);
+  ::close(fd);
+  return running;
+#endif
+}
+
+namespace {
+// WWE '13 PC builds on the ReXGlue SDK 0.10 (port/): rexruntime.dll sits beside the game. Two executables:
+// wwe13_native.exe (re:Blue + plume, the game's D3D calls drawn natively) and wwe13.exe (Xenos GPU
+// emulation). Their options are the SDK 0.10 / native renderer cvars, not the older build's.
+bool IsPortLayout(const Paths& paths) {
+  std::error_code ec;
+  return fs::exists(paths.exe_dir / "rexruntime.dll", ec);
+}
+}  // namespace
+
+bool IsPortBuild(const Paths& paths) { return IsPortLayout(paths); }
+
+namespace {
+
+// Internal resolution as the native renderer's svr_render_scale (picture height; 0 = automatic) or the Xenos
+// path's resolution_scale.
+int PortRenderHeight(Resolution resolution) {
+  switch (resolution) {
+    case Resolution::k480p: return 480;
+    case Resolution::k576p: return 540;
+    case Resolution::k1080p: return 1080;
+    case Resolution::k1440p: return 1440;
+    case Resolution::k360p: return 360;
+    case Resolution::k2160p: return 2160;
+    case Resolution::k720p: default: return 720;
+  }
+}
+
+LaunchPlan BuildPortLaunchPlan(const Paths& paths, const Settings& settings, const Settings& effective,
+                               const std::vector<GpuInfo>& gpus) {
+  LaunchPlan plan;
+  std::error_code ec;
+  // Graphics API (WWE '12 PC's menu): the native renderer's executable for it, or wwe13.exe (Xenos
+  // emulation). A missing executable falls back along the AUTO chain (Vulkan, Direct3D 12, Direct3D 11),
+  // then to wwe13.exe. gpu_backend tells the native executable whether AUTO may start the next one.
+  struct NativeExe {
+    GraphicsApi api;
+    const char* file;
+    const char* backend;
+  };
+  static constexpr NativeExe kNativeExes[] = {{GraphicsApi::kVulkan, "wwe13_native.exe", "vulkan"},
+                                              {GraphicsApi::kD3D12, "wwe13_d3d12.exe", "d3d12"},
+                                              {GraphicsApi::kD3D11, "wwe13_d3d11.exe", "d3d11"}};
+  fs::path native_exe;
+  std::string backend = "any";
+  if (effective.graphics_api != GraphicsApi::kEmulated) {
+    for (const NativeExe& exe : kNativeExes) {
+      if (effective.graphics_api == exe.api && fs::exists(paths.exe_dir / exe.file, ec)) {
+        native_exe = paths.exe_dir / exe.file;
+        backend = exe.backend;
+      }
+    }
+    for (const NativeExe& exe : kNativeExes) {
+      if (native_exe.empty() && fs::exists(paths.exe_dir / exe.file, ec)) native_exe = paths.exe_dir / exe.file;
+    }
+  }
+  const bool native = !native_exe.empty();
+  plan.executable = native ? native_exe : paths.game_exe;
+  plan.working_directory = paths.exe_dir;
+  const fs::path game_folder = effective.game_folder.empty() ? paths.default_game_folder : effective.game_folder;
+  const fs::path log_file = paths.logs_dir /
+      ("wwe13-" + internal::LocalTimestamp(std::chrono::system_clock::now(), "%Y%m%d-%H%M%S") + ".log");
+  const bool fullscreen = effective.display != DisplayMode::kWindowed;
+  plan.arguments = {
+      "--game_data_root=" + internal::PathToUtf8(game_folder),
+      "--user_data_root=" + internal::PathToUtf8(paths.userdata_dir),
+      "--log_file=" + internal::PathToUtf8(log_file),
+      fullscreen ? "--fullscreen=true" : "--fullscreen=false",
+      "--mnk_mode=true"};
+  const auto selected_gpu = std::find_if(gpus.begin(), gpus.end(),
+                                         [&](const GpuInfo& gpu) { return gpu.id == settings.gpu_id; });
+  if (native) {
+    plan.arguments.emplace_back("--gpu_backend=" + backend);
+    // Automatic resolution (from the display, lower on integrated GPUs) unless the player chose one.
+    if (settings.explicit_choice)
+      plan.arguments.emplace_back("--svr_render_scale=" + std::to_string(PortRenderHeight(effective.resolution)));
+    if (!settings.gpu_id.empty() && selected_gpu != gpus.end())
+      plan.arguments.emplace_back("--svr_gpu_device=" + selected_gpu->name);
+  } else {
+    plan.arguments.emplace_back("--gpu_plugin=xenos");
+    if (effective.resolution == Resolution::k1440p) plan.arguments.emplace_back("--resolution_scale=2");
+    if (effective.resolution == Resolution::k2160p) plan.arguments.emplace_back("--resolution_scale=3");
+    if (!settings.gpu_id.empty() && selected_gpu != gpus.end() && selected_gpu->vulkan_index >= 0)
+      plan.arguments.emplace_back("--vulkan_device=" + std::to_string(selected_gpu->vulkan_index));
+  }
+  plan.environment = {{"REX_DEBUG_UI", "false"}};
+  return plan;
+}
+}  // namespace
+
+LaunchPlan BuildLaunchPlan(const Paths& paths, const Settings& settings,
+                           const std::vector<GpuInfo>& gpus) {
+  const Settings effective = EffectiveSettings(settings, gpus, IsPortLayout(paths));
+  if (IsPortLayout(paths)) return BuildPortLaunchPlan(paths, settings, effective, gpus);
+  LaunchPlan plan;
+  plan.executable = paths.game_exe;
+  plan.working_directory = paths.exe_dir;
+
+  const fs::path game_folder = effective.game_folder.empty() ? paths.default_game_folder
+                                                              : effective.game_folder;
+  plan.arguments.push_back(internal::PathToUtf8(game_folder));
+  const bool fullscreen = effective.display != DisplayMode::kWindowed;
+  const fs::path log_file = paths.logs_dir /
+      ("wwe13-" + internal::LocalTimestamp(std::chrono::system_clock::now(), "%Y%m%d-%H%M%S") + ".log");
+  const std::array<std::string, 10> fixed_arguments = {
+      "--async_shader_compilation=false",
+      "--vulkan_async_skip_incomplete_frames=false",
+      fullscreen ? "--fullscreen=true" : "--fullscreen=false",
+      "--vulkan_allow_present_mode_immediate=false",
+      "--ignore_offset_for_ranged_allocations=true",
+      "--log_verbose=false",
+      "--mnk_mode=true",
+      "--log_file=" + internal::PathToUtf8(log_file),
+      "--user_data_root=" + internal::PathToUtf8(paths.userdata_dir),
+      "--debug_ui=false"};
+  plan.arguments.insert(plan.arguments.end(), fixed_arguments.begin(), fixed_arguments.end());
+
+  const ResolutionParameters resolution = GetResolutionParameters(effective.resolution);
+  if (resolution.output) plan.arguments.emplace_back(std::string("--resolution=") + resolution.output);
+  if (resolution.scale > 1) plan.arguments.emplace_back("--resolution_scale=" + std::to_string(resolution.scale));
+  if (!settings.gpu_id.empty()) {
+    // "vendor:device" selects a device by identity. When a PC has two identical GPUs the launcher
+    // disambiguates them as "vendor:device:index" (gpus.cpp), but the game's vulkan_device_id parser
+    // accepts exactly one colon and rejects the extra one, silently falling back to automatic device
+    // selection. Pass the enumerated index the launcher recorded for those instead.
+    const auto selected_gpu = std::find_if(gpus.begin(), gpus.end(), [&](const GpuInfo& gpu) {
+      return gpu.id == settings.gpu_id;
+    });
+    const bool disambiguated = selected_gpu != gpus.end() && selected_gpu->vulkan_index >= 0 &&
+        settings.gpu_id.find(':', settings.gpu_id.find(':') + 1) != std::string::npos;
+    if (disambiguated) {
+      plan.arguments.emplace_back("--vulkan_device=" + std::to_string(selected_gpu->vulkan_index));
+    } else {
+      plan.arguments.emplace_back("--vulkan_device_id=" + settings.gpu_id);
+    }
+  }
+  // Fill a 21:9 or 16:10 screen (stretched 16:9 picture) instead of pillarboxing it.
+  if (effective.stretch_to_fill) plan.arguments.emplace_back("--present_letterbox=false");
+
+  plan.environment = {
+      {"REX_DEBUG_UI", "false"},
+      {"WWE13_RATE_CENSUS", ""},
+      {"WWE13_FRAME_TIME", ""},
+      {"WWE13_PERF_OVERLAY", ""},
+      {"WWE13_THREAD_PROFILE", ""},
+      {"WWE13_THREAD_PROFILE_HZ", ""},
+      {"WWE13_THREAD_PROFILE_OUT", ""},
+      {"WWE13_LOCK_OWNER_SAMPLE", ""},
+      {"WWE13_F24_PIXEL_RATE", "1"},
+      // Pace guest frames on the display's vblank when it runs at a multiple of 60 Hz (Windows only;
+      // on Linux the SDK's WaitForHostDisplayVBlank/GetHostDisplayRefreshHz are no-ops). Default on.
+      {"WWE13_HOST_VSYNC", effective.sync_to_display ? "1" : "0"},
+      {"WWE13_INTERNAL_RES", resolution.internal ? resolution.internal : ""},
+      {"WWE13_SCENE_AA", effective.anti_aliasing == AntiAliasing::kFaster2x ? "2x" : ""}};
+#ifndef _WIN32
+  // RenderDoc's implicit Vulkan layer draws a capture banner over the game. Disable only that layer
+  // for the game process; keep other loader filters already chosen by the user (for example, Steam
+  // Overlay or MangoHud) intact.
+  std::string layers_to_disable;
+  if (const char* existing = std::getenv("VK_LOADER_LAYERS_DISABLE")) {
+    layers_to_disable = existing;
+  }
+  if (!layers_to_disable.empty() && layers_to_disable.back() != ',') {
+    layers_to_disable.push_back(',');
+  }
+  layers_to_disable += "VK_LAYER_RENDERDOC_Capture";
+  plan.environment.emplace_back("VK_LOADER_LAYERS_DISABLE", std::move(layers_to_disable));
+#endif
+  if (effective.frame_rate == FrameRate::kKeep60) plan.environment.emplace_back("WWE13_KEEP_60", "1");
+  else if (effective.frame_rate == FrameRate::kLock30) plan.environment.emplace_back("WWE13_LOCK_30", "1");
+  return plan;
+}
+
+#ifdef _WIN32
+namespace {
+// The Windows game build targets x86-64-v3 (AVX2/FMA/BMI2): on an older processor it would close
+// instantly with an illegal instruction. Check first and say so (GitHub #6).
+bool ProcessorSupportsGameBuild() {
+  int regs[4] = {};
+  __cpuid(regs, 0);
+  if (regs[0] < 7) return false;
+  __cpuid(regs, 1);
+  const bool osxsave = (regs[2] & (1 << 27)) != 0;
+  const bool avx = (regs[2] & (1 << 28)) != 0;
+  const bool fma = (regs[2] & (1 << 12)) != 0;
+  if (!osxsave || !avx || !fma) return false;
+  if ((_xgetbv(0) & 0x6) != 0x6) return false;  // OS saves the YMM registers
+  __cpuidex(regs, 7, 0);
+  const bool avx2 = (regs[1] & (1 << 5)) != 0;
+  const bool bmi1 = (regs[1] & (1 << 3)) != 0;
+  const bool bmi2 = (regs[1] & (1 << 8)) != 0;
+  return avx2 && bmi1 && bmi2;
+}
+}  // namespace
+#endif
+
+Result StartGame(const LaunchPlan& plan, double watch_seconds, std::atomic<bool>* process_started) {
+  if (process_started) process_started->store(false, std::memory_order_relaxed);
+  try {
+    std::error_code error;
+    fs::path user_data_root;
+    for (const std::string& argument : plan.arguments) {
+      constexpr std::string_view log_prefix = "--log_file=";
+      constexpr std::string_view user_prefix = "--user_data_root=";
+      if (argument.starts_with(log_prefix)) {
+        if (!internal::EnsureDirectory(internal::PathFromUtf8(argument.substr(log_prefix.size())).parent_path())) {
+          return Result::Fail("The launcher could not prepare the game folders.");
+        }
+      } else if (argument.starts_with(user_prefix)) {
+        user_data_root = internal::PathFromUtf8(argument.substr(user_prefix.size()));
+        if (!internal::EnsureDirectory(user_data_root)) {
+          return Result::Fail("The launcher could not prepare the game folders.");
+        }
+      }
+    }
+    if (!fs::is_regular_file(plan.executable, error) || error) {
+      return Result::Fail("The game program could not be found next to the launcher.");
+    }
+    // GitHub #6: never start a second game against the same user-data folder; it would fight the
+    // running one for the GPU (the first start-up can look frozen while shaders are prepared).
+    if (GameAlreadyRunning(user_data_root)) {
+      return Result::Fail(
+          "WWE '13 is already running. Close the other game window, then press Play again.");
+    }
+#ifdef _WIN32
+    if (!ProcessorSupportsGameBuild()) {
+      return Result::Fail(
+          "This PC's processor is too old for WWE '13 PC: it needs AVX2 (Intel Core 4th generation, "
+          "AMD Ryzen or newer). The game cannot start on this processor.");
+    }
+    std::wstring command = QuoteArgument(plan.executable.wstring());
+    for (const std::string& argument : plan.arguments) {
+      command.push_back(L' ');
+      command += QuoteArgument(Wide(argument));
+    }
+    command.push_back(L'\0');
+    std::vector<wchar_t> environment = WindowsEnvironmentBlock(plan.environment);
+    const std::wstring working_directory = plan.working_directory.empty()
+                                               ? plan.executable.parent_path().wstring()
+                                               : plan.working_directory.wstring();
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(plan.executable.c_str(), command.data(), nullptr, nullptr, FALSE,
+                        CREATE_UNICODE_ENVIRONMENT, environment.data(),
+                        working_directory.empty() ? nullptr : working_directory.c_str(),
+                        &startup, &process)) {
+      return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
+    }
+    CloseHandle(process.hThread);
+    if (process_started) process_started->store(true, std::memory_order_release);
+    bool failed_early = false;
+    if (watch_seconds > 0.0 &&
+        WaitForSingleObject(process.hProcess, DWORD(watch_seconds * 1000.0)) == WAIT_OBJECT_0) {
+      DWORD exit_code = 0;
+      failed_early = !GetExitCodeProcess(process.hProcess, &exit_code) || exit_code != 0;
+    }
+    CloseHandle(process.hProcess);
+    if (failed_early) return Result::Fail(kGameClosedEarlyMessage);
+    return Result::Ok();
+#else
+    std::vector<std::string> arguments;
+    arguments.reserve(plan.arguments.size() + 1);
+    arguments.push_back(internal::PathToUtf8(plan.executable));
+    arguments.insert(arguments.end(), plan.arguments.begin(), plan.arguments.end());
+    std::vector<char*> argv;
+    for (std::string& argument : arguments) argv.push_back(argument.data());
+    argv.push_back(nullptr);
+    std::vector<std::string> environment = PosixEnvironment(plan.environment);
+    std::vector<char*> envp;
+    for (std::string& entry : environment) envp.push_back(entry.data());
+    envp.push_back(nullptr);
+
+    posix_spawn_file_actions_t actions;
+    if (posix_spawn_file_actions_init(&actions) != 0) {
+      return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
+    }
+    const fs::path cwd = plan.working_directory.empty() ? plan.executable.parent_path()
+                                                        : plan.working_directory;
+    int status = 0;
+    if (!cwd.empty()) status = posix_spawn_file_actions_addchdir_np(&actions, cwd.c_str());
+    if (status != 0) {
+      posix_spawn_file_actions_destroy(&actions);
+      return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
+    }
+    posix_spawnattr_t attributes;
+    if (posix_spawnattr_init(&attributes) != 0) {
+      posix_spawn_file_actions_destroy(&actions);
+      return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
+    }
+#ifdef POSIX_SPAWN_SETSID
+    (void)posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSID);
+#endif
+    pid_t child = 0;
+    status = posix_spawn(&child, plan.executable.c_str(), &actions, &attributes,
+                         argv.data(), envp.data());
+    posix_spawnattr_destroy(&attributes);
+    posix_spawn_file_actions_destroy(&actions);
+    if (status != 0) {
+      return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
+    }
+    if (process_started) process_started->store(true, std::memory_order_release);
+    if (watch_seconds > 0.0) {
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(int64_t(watch_seconds * 1000.0));
+      while (std::chrono::steady_clock::now() < deadline) {
+        int wait_status = 0;
+        const pid_t done = waitpid(child, &wait_status, WNOHANG);
+        if (done == child) {
+          const bool exited_unsuccessfully = WIFSIGNALED(wait_status) ||
+              (WIFEXITED(wait_status) && WEXITSTATUS(wait_status) != 0);
+          return exited_unsuccessfully ? Result::Fail(kGameClosedEarlyMessage) : Result::Ok();
+        }
+        if (done < 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+    }
+    return Result::Ok();
+#endif
+  } catch (...) {
+    return Result::Fail("WWE '13 could not be started. Check the game folder and try again.");
+  }
+}
+
+}  // namespace wwe13::launcher

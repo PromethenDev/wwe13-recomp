@@ -1,0 +1,29 @@
+From 61b804aa067957d027875c2482ec35819cc4e799 Mon Sep 17 00:00:00 2001
+From: PromethenDev <PromethenDev@users.noreply.github.com>
+Date: Sat, 3 Oct 2026 17:29:43 -0700
+Subject: [PATCH 88/89] v1.0.1: decode Intel Windows Vulkan driver versions
+ correctly (driver=x.x.<hi>.<lo>, (hi<<14)|lo; e.g. 0x194861 = 101.2145)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/ui/vulkan/vulkan_device.cpp | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/ui/vulkan/vulkan_device.cpp b/src/ui/vulkan/vulkan_device.cpp
+index d3b1aa9..339df65 100644
+--- a/src/ui/vulkan/vulkan_device.cpp
++++ b/src/ui/vulkan/vulkan_device.cpp
+@@ -59,9 +59,11 @@ void LogDecodedDriverVersion(const VulkanDevice::Properties& properties) {
+   } else if (properties.driverID == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS ||
+              (properties.driverID == VkDriverId(0) && properties.vendorID == 0x8086 &&
+               REX_PLATFORM_WIN32)) {
++    // Intel Windows packs the last two fields of the driver version shown in Device Manager
++    // (e.g. 31.0.101.2145) as (101 << 14) | 2145.
+     REXLOG_INFO(
+-        "VulkanDriverVersion: vendor=Intel scheme=intel-windows major={} minor={} patch={} raw=0x{:X}",
+-        version >> 14, (version >> 6) & 0xFF, version & 0x3F, version);
++        "VulkanDriverVersion: vendor=Intel scheme=intel-windows driver=x.x.{}.{} raw=0x{:X}",
++        version >> 14, version & 0x3FFF, version);
+   } else if (properties.driverID == VK_DRIVER_ID_AMD_PROPRIETARY ||
+              (properties.driverID == VkDriverId(0) && properties.vendorID == 0x1002 &&
+               REX_PLATFORM_WIN32)) {

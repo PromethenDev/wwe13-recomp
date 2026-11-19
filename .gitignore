@@ -1,0 +1,30 @@
+# Your own game files and everything derived from them - never commit these.
+game/
+generated/
+*.xex
+*.xexp
+*.iso
+# Build output
+out/
+build/
+# Local settings / caches
+wwe13.toml
+*.log
+*.arc
+*.pac
+*.pck
+*.bik
+*.bik2
+*.xtr
+compile_commands.json
+CMakeUserPresets.json
+
+# Native port (port/, SDK 0.10): local game link, generated code and builds stay local.
+/port/assets
+/port/out/
+!/port/generated/
+/port/generated/*
+!/port/generated/rexglue.cmake
+
+# Local work files (dumped game shaders, captures): game-derived, never committed.
+/work/

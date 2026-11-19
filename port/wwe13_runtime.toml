@@ -1,0 +1,36 @@
+# WWE '13 PC runtime settings, copied beside the exe as wwe13.toml (the SDK reads <exe>\wwe13.toml).
+# Keyboard layout and language of the original project's release (keys: L = A, K = B, Escape = Start).
+
+keybind_a = "L"
+keybind_b = "K"
+keybind_x = "J"
+keybind_y = "Space"
+keybind_left_trigger = "Shift"
+keybind_right_trigger = "1"
+keybind_left_shoulder = "U"
+keybind_right_shoulder = "Control"
+keybind_lstick_up = "W"
+keybind_lstick_down = "S"
+keybind_lstick_left = "A"
+keybind_lstick_right = "D"
+keybind_lstick_press = "C"
+keybind_rstick_up = "T"
+keybind_rstick_down = "G"
+keybind_rstick_left = "F"
+keybind_rstick_right = "H"
+keybind_rstick_press = "V"
+keybind_dpad_up = "Up"
+keybind_dpad_down = "Down"
+keybind_dpad_left = "Left"
+keybind_dpad_right = "Right"
+keybind_back = "Tab"
+keybind_start = "Escape"
+user_language = 4
+
+# Vulkan backend of the Xenos plugin (until the native renderer, docs/NATIVE_PORT_PLAN.md).
+gpu_backend = "vulkan"
+
+# EDRAM through fragment shader interlock (FSI): the host render-target path splits entrance and victory
+# scenes in two (seen 2026-11-17, as in WWE 2K15). "auto" = FSI except on AMD / pre-Pascal NVIDIA, where FSI
+# is 3-4x slower (WWE 2K15 PC issue #3). The native renderer (docs/NATIVE_PORT_PLAN.md) removes this choice.
+render_target_path_vulkan = "auto"

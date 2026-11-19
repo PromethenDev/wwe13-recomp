@@ -1,0 +1,13 @@
+# WWE '13 on the ReXGlue SDK 0.10 (the SDK of WWE '12 PC and WWE 2K15 PC).
+# port/assets is a local link (junction) to your own game folder: default.xex + default.xexp
+# (title update 2.0.1.0) and the game files. It is never committed.
+
+[project]
+name = "wwe13"
+sdk_version = "0.10.0"
+game_root = "assets"
+
+[entrypoint]
+file_path = "assets/default.xex"
+out_directory_path = "generated/default"
+includes = ["wwe13_config.toml"]

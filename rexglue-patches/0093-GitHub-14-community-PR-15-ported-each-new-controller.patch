@@ -1,0 +1,55 @@
+From 60397e836c531f0d8f1c1313d921966692cafe38 Mon Sep 17 00:00:00 2001
+From: PromethenDev <PromethenDev@users.noreply.github.com>
+Date: Mon, 5 Oct 2026 18:26:54 -0700
+Subject: [PATCH 93/93] GitHub #14 (community PR #15, ported): each new
+ controller takes the lowest free slot instead of its own SDL/XInput player
+ index, so a single pad is always user 0 (signed in, saves work) even when
+ Windows gave it XInput slot 1+ (another or virtual pad connected first). Slot
+ release/reuse path reviewed; not tested with a physical pad (Windows/XInput
+ only) (DeepSeek Flash worker port, Claude reviewed)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/input/sdl/sdl_input_driver.cpp | 24 +++++++++---------------
+ 1 file changed, 9 insertions(+), 15 deletions(-)
+
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index b85259b..4ef1529 100644
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -452,23 +452,17 @@ void SDLInputDriver::OnControllerDeviceAddedLocked(const SDL_Event& event) {
+       static_cast<int>(SDL_GetGamepadType(controller)), SDL_GetGamepadVendor(controller),
+       SDL_GetGamepadProduct(controller));
+   int user_id = -1;
+-  // Check if the controller has a player index LED.
+-  user_id = SDL_GetGamepadPlayerIndex(controller);
+-  // Is that id already taken?
+-  if (user_id < 0 || user_id >= static_cast<int>(controllers_.size()) ||
+-      controllers_.at(user_id).sdl) {
+-    user_id = -1;
+-  }
+-  // No player index or already taken, just take the first free slot.
+-  if (user_id < 0) {
+-    for (size_t i = 0; i < controllers_.size(); i++) {
+-      if (!controllers_.at(i).sdl) {
+-        user_id = static_cast<int>(i);
++  // Always take the first free slot, not the controller's own player index (on Windows its XInput
++  // slot): only user 0 is signed in, so a pad that Windows put in XInput slot 1+ (another pad or a
++  // virtual one connected first, even after that device is unplugged) would otherwise play signed
++  // out, with no storage device and no saves (GitHub #14).
++  for (size_t i = 0; i < controllers_.size(); i++) {
++    if (!controllers_.at(i).sdl) {
++      user_id = static_cast<int>(i);
+ #if SDL_VERSION_ATLEAST(2, 0, 12)
+-        SDL_SetGamepadPlayerIndex(controller, user_id);
++      SDL_SetGamepadPlayerIndex(controller, user_id);
+ #endif
+-        break;
+-      }
++      break;
+     }
+   }
+   if (user_id >= 0) {
+-- 
+2.43.0
+
