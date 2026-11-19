@@ -2074,8 +2074,10 @@ void DrawPlay(AppState& app) {
   if (g_port_build && app.settings.graphics_api != GraphicsApi::kEmulated) {
     ImGui::Spacing();
     ImGui::PushFont(app.fonts.barlow_small);
-    DrawTextDisabled(app, "Native renderer (experimental): if a scene looks wrong or the game crashes, "
-                          "choose Graphics API \"Emulated\" in Settings.");
+    ImGui::PushStyleColor(ImGuiCol_Text, kMuted);
+    ImGui::TextWrapped("Native renderer (experimental): if a scene looks wrong or the game crashes, "
+                       "choose Graphics API \"Emulated\" in Settings.");
+    ImGui::PopStyleColor();
     ImGui::PopFont();
   }
   ImGui::Spacing();
