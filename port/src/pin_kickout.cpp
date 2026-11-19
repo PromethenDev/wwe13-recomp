@@ -200,14 +200,16 @@ extern "C" REX_FUNC(sub_8240B330) {
     }
   }
   __imp__sub_8240B330(ctx, base);
-  if (!action || !REXCVAR_GET(wwe13_pin_log)) return;
+  if (!action) return;
   std::lock_guard lock(g_mutex);
   auto it = g_attempts.find(action);
   if (it == g_attempts.end() || !it->second.flmg) return;
   Attempt& a = it->second;
   const uint32_t state = Ld32(base, a.flmg + kFlmgState);
   const bool attempting = Ld32(base, action + kAttempt) != 0;
-  if (state != a.last_state || attempting != a.attempting) {
+  // (The finished attempt is dropped below whether or not the log is on: before, with wwe13_pin_log off,
+  // the map kept every attempt of the session.)
+  if (REXCVAR_GET(wwe13_pin_log) && (state != a.last_state || attempting != a.attempting)) {
     const RefCount rc = ReadCount(base);
     REXLOG_INFO("[wwe13-pin] +{:.0f} ms (referee count {}): bar state {} -> {}{}{}, cursor {:.1f}", Ms(a.start),
                 rc.count, a.last_state, state,
