@@ -28,8 +28,8 @@ enum Kind : u8 {
 
 bool Enabled();
 // Record that the work following this point on the open command list is of `kind`. `rt` (draws
-// only) picks the size bucket.
-void Mark(VideoState &s, Kind kind, const GuestTexture *rt = nullptr);
+// only) picks the size bucket; for resolves `rt` is the source and `dst` the destination.
+void Mark(VideoState &s, Kind kind, const GuestTexture *rt = nullptr, const GuestTexture *dst = nullptr);
 // The open command list is about to be ended (resolves its timestamps into the readback buffer).
 void OnListEnd(VideoState &s);
 // The frame slot's GPU work has finished (its fence was waited on): read and accumulate it.

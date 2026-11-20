@@ -33,7 +33,9 @@ constexpr u16 kEnd = 0xFFFF;          // end of a command list: the gap after it
 constexpr u16 kNone = 0xFFFE;
 constexpr u32 kMaxBuckets = 48;       // draw target sizes
 constexpr u16 kBucketBase = 16;       // draw keys: kBucketBase + bucket
-constexpr u32 kKeys = kBucketBase + kMaxBuckets + 1;
+constexpr u32 kMaxResolveSigs = 48;  // resolve signatures (source -> destination)
+constexpr u16 kResolveBase = kBucketBase + kMaxBuckets + 1;
+constexpr u32 kKeys = kResolveBase + kMaxResolveSigs + 1;
 
 const char *const kKindNames[kKindCount] = {"draw", "resolve-copy", "resolve-draw", "clear",
                                             "upload", "present", "other"};
@@ -52,6 +54,9 @@ struct Census {
   // Draw buckets: target width x height (0 x 0 = no colour target).
   std::array<u32, kMaxBuckets> bucket_w{}, bucket_h{};
   u32 buckets = 0;
+  struct Sig { u32 sw, sh, sf, ss, dw, dh, df, sc; u8 kind; };
+  std::array<Sig, kMaxResolveSigs> sigs{};
+  u32 nsigs = 0;
   std::mutex mutex;  // accumulators (written on retire, read on present)
   std::array<double, kKeys> ns{};
   std::array<u64, kKeys> marks{};
@@ -76,6 +81,22 @@ u16 DrawKey(Census &c, const GuestTexture *rt) {
     return u16(kBucketBase + c.buckets++);
   }
   return u16(kBucketBase + kMaxBuckets);  // "other sizes"
+}
+
+u16 ResolveKey(Census &c, Kind kind, const GuestTexture *src, const GuestTexture *dst) {
+  Census::Sig g{src->width, src->height, u32(src->format), u32(src->sampleCount), dst->width, dst->height,
+                u32(dst->format), u32(dst->resolveScale * 100.0f + 0.5f), u8(kind)};
+  for (u32 i = 0; i < c.nsigs; ++i) {
+    const auto &e = c.sigs[i];
+    if (e.sw == g.sw && e.sh == g.sh && e.sf == g.sf && e.ss == g.ss && e.dw == g.dw && e.dh == g.dh &&
+        e.df == g.df && e.sc == g.sc && e.kind == g.kind)
+      return u16(kResolveBase + i);
+  }
+  if (c.nsigs < kMaxResolveSigs) {
+    c.sigs[c.nsigs] = g;
+    return u16(kResolveBase + c.nsigs++);
+  }
+  return u16(kResolveBase + kMaxResolveSigs);
 }
 
 void Write(VideoState &s, Census &c, u16 key) {
@@ -104,11 +125,13 @@ bool Enabled() {
   return on;
 }
 
-void Mark(VideoState &s, Kind kind, const GuestTexture *rt) {
+void Mark(VideoState &s, Kind kind, const GuestTexture *rt, const GuestTexture *dst) {
   if (!Enabled())
     return;
   Census &c = C();
-  const u16 key = kind == kDraw ? DrawKey(c, rt) : u16(kind);
+  const u16 key = kind == kDraw ? DrawKey(c, rt)
+                  : (kind == kResolveCopy || kind == kResolveDraw) && rt && dst ? ResolveKey(c, kind, rt, dst)
+                  : u16(kind);
   if (key == c.current)
     return;
   c.current = key;
@@ -195,6 +218,12 @@ void OnPresent() {
       name = kKindNames[k];
     else if (k == kBucketBase + kMaxBuckets)
       name = "draw other-size";
+    else if (k >= kResolveBase && k < kResolveBase + c.nsigs) {
+      const auto &g = c.sigs[k - kResolveBase];
+      name = std::format("{} {}x{} f{} s{} -> {}x{} f{} x{}%", g.kind == kResolveDraw ? "resolve-draw" : "resolve-copy",
+                         g.sw, g.sh, g.sf, g.ss, g.dw, g.dh, g.df, g.sc);
+    } else if (k >= kResolveBase)
+      name = "resolve other";
     else
       name = "draw " + std::to_string(c.bucket_w[k - kBucketBase]) + "x" +
              std::to_string(c.bucket_h[k - kBucketBase]);
@@ -218,7 +247,7 @@ void OnPresent() {
 
 namespace bd::gpu::census {
 bool Enabled() { return false; }
-void Mark(VideoState &, Kind, const GuestTexture *) {}
+void Mark(VideoState &, Kind, const GuestTexture *, const GuestTexture *) {}
 void OnListEnd(VideoState &) {}
 void OnSlotRetired(VideoState &, u32) {}
 void OnPresent() {}

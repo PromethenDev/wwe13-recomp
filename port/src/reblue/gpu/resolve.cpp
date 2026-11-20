@@ -110,13 +110,13 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
     src->layout = plume::RenderTextureLayout::COPY_SOURCE;
     dst->layout = plume::RenderTextureLayout::COPY_DEST;
     if (dst_is_cube) {
-      census::Mark(s, census::kResolveCopy);
+      census::Mark(s, census::kResolveCopy, src, dst);
       s.command_list->copyTextureRegion(
           plume::RenderTextureCopyLocation::Subresource(
               dst->texture, dst->resolveLevel, dst->resolveFace),
           plume::RenderTextureCopyLocation::Subresource(src->texture, 0, 0));
     } else {
-      census::Mark(s, census::kResolveCopy);
+      census::Mark(s, census::kResolveCopy, src, dst);
       s.command_list->copyTexture(dst->texture, src->texture);
     }
   } else if (dst_is_cube) {
@@ -263,7 +263,7 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
     s.command_list->setGraphicsPushConstants(kCopyPushConstantRangeIndex, &push,
                                              kCopyPushConstantByteOffset,
                                              sizeof(push));
-    census::Mark(s, census::kResolveDraw);
+    census::Mark(s, census::kResolveDraw, src, dst);
     s.command_list->drawInstanced(3, 1, 0, 0);
 
     s.command_list->setFramebuffer(nullptr);
@@ -488,7 +488,7 @@ bool Video::ResolveRegion(u32 flags, GuestTexture *dst, u32 level, u32 face, i32
   src->layout = plume::RenderTextureLayout::COPY_SOURCE;
   dst->layout = plume::RenderTextureLayout::COPY_DEST;
   const plume::RenderBox box(left, top, right, bottom);
-  census::Mark(s, census::kResolveCopy);
+  census::Mark(s, census::kResolveCopy, src, dst);
   s.command_list->copyTextureRegion(
       plume::RenderTextureCopyLocation::Subresource(dst->texture, level, face),
       plume::RenderTextureCopyLocation::Subresource(src->texture, 0, 0), u32(dst_x), u32(dst_y),
