@@ -12,6 +12,7 @@
 #include "gpu/frame.h"
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -31,12 +32,34 @@
 #include "gpu/constant_buffers.h"
 #include "gpu/format.h"
 
+// Full same-size, same-format resolves (Video::ResolveRegion) become the same deferred source link as
+// ResolveRtToTexture's lazy alias: the texture samples the render target until the target is written
+// again, when MaterializeOutboundLocked copies the snapshot. Off by default (picture check pending).
+REXCVAR_DEFINE_BOOL(wwe13_resolve_alias, false, "WWE13",
+                    "Avoid full same-size, same-format single-sample resolves by aliasing the render target until its next write.")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 namespace bd::gpu {
 
 namespace {
 
 inline const plume::RenderTexture *const kDepthFbKey =
     reinterpret_cast<const plume::RenderTexture *>(uintptr_t{1});
+
+std::atomic<u64> g_resolve_copies_avoided{0};
+std::atomic<u64> g_resolve_copies_done{0};
+std::chrono::steady_clock::time_point g_resolve_log_time{};
+
+void LogResolveCopyStats() {
+  const auto now = std::chrono::steady_clock::now();
+  if (g_resolve_log_time.time_since_epoch().count() != 0 &&
+      now - g_resolve_log_time < std::chrono::seconds(10))
+    return;
+  g_resolve_log_time = now;
+  BD_INFO("[wwe13-resolve-alias] copies avoided={} done={}",
+          g_resolve_copies_avoided.load(std::memory_order_relaxed),
+          g_resolve_copies_done.load(std::memory_order_relaxed));
+}
 
 GuestTexture *ResolveSourceForFlagsLocked(VideoState &s, u32 flags) {
   if (flags & kResolveDepthStencil)
@@ -272,6 +295,10 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
     s.draw_framebuffer_bound = false;
   }
 
+  if (REXCVAR_GET(wwe13_resolve_alias)) {
+    g_resolve_copies_done.fetch_add(1, std::memory_order_relaxed);
+    LogResolveCopyStats();
+  }
   plume::RenderTextureBarrier post(dst->texture,
                                    plume::RenderTextureLayout::SHADER_READ);
   s.command_list->barriers(plume::RenderBarrierStage::GRAPHICS, &post, 1);
@@ -434,6 +461,10 @@ void Video::ResolveRtToTexture(GuestTexture *dst) {
     return;
 
   if (CanAliasResolveLocked(src, dst)) {
+    if (REXCVAR_GET(wwe13_resolve_alias)) {
+      g_resolve_copies_avoided.fetch_add(1, std::memory_order_relaxed);
+      LogResolveCopyStats();
+    }
     s.last_resolved_dst = dst;
     NoteTileContentLocked(s, dst);
     s.draw_framebuffer_bound = false;
@@ -476,6 +507,33 @@ bool Video::ResolveRegion(u32 flags, GuestTexture *dst, u32 level, u32 face, i32
   if (right <= left || bottom <= top)
     return true;
 
+  // A complete level-zero resolve is just a view of the source until its next
+  // write. Partial regions and subresources retain their accumulated-copy semantics.
+  const bool full_subresource =
+      level == 0 && face == 0 &&
+      dst->viewDimension != plume::RenderTextureViewDimension::TEXTURE_CUBE &&
+      dst->mipLevels <= 1 && dst->width == src->width &&
+      dst->height == src->height && left == 0 && top == 0 &&
+      right == i32(src->width) && bottom == i32(src->height) && dst_x == 0 &&
+      dst_y == 0;
+  if (REXCVAR_GET(wwe13_resolve_alias) && full_subresource) {
+    if (dst->sourceSurface && dst->sourceSurface != src)
+      dst->sourceSurface->destinationTextures.erase(dst);
+    dst->sourceSurface = src;
+    src->destinationTextures.insert(dst);
+    BindTextureSRVLocked(s, src);
+    s.last_resolved_dst = dst;
+    NoteTileContentLocked(s, dst);
+    s.draw_framebuffer_bound = false;
+    g_resolve_copies_avoided.fetch_add(1, std::memory_order_relaxed);
+    LogResolveCopyStats();
+    return true;
+  }
+
+  // A partial resolve into a texture that still samples an earlier full resolve through the alias
+  // must first receive that snapshot, or the part not covered now would show stale texture memory.
+  if (REXCVAR_GET(wwe13_resolve_alias) && dst->sourceSurface && dst->sourceSurface != dst)
+    MaterializeInboundLocked(s, dst);
   BeginCommandList(s);
   if (!s.command_list_open)
     return false;
@@ -493,6 +551,10 @@ bool Video::ResolveRegion(u32 flags, GuestTexture *dst, u32 level, u32 face, i32
       plume::RenderTextureCopyLocation::Subresource(dst->texture, level, face),
       plume::RenderTextureCopyLocation::Subresource(src->texture, 0, 0), u32(dst_x), u32(dst_y),
       0, &box);
+  if (REXCVAR_GET(wwe13_resolve_alias)) {
+    g_resolve_copies_done.fetch_add(1, std::memory_order_relaxed);
+    LogResolveCopyStats();
+  }
   s.last_resolved_dst = dst;
   NoteTileContentLocked(s, dst);
   // The texture now holds pieces of several resolves: never re-copy the whole source over it.
