@@ -15,6 +15,8 @@
 #include <rex/ppc/context.h>
 #include <rex/ppc/function.h>
 
+#include "recorder.h"
+
 namespace svr {
 
 // WWE 2K15 bring-up switch (cvar svr_hooks_off, native/wwe13_native_stubs.cpp): a comma list of
@@ -56,6 +58,7 @@ inline void CopyArgs(PPCContext &dst, const PPCContext &src) {
     PPCContext svr_args;                                         \
     ::svr::CopyArgs(svr_args, ctx);                              \
     __imp__##subroutine(ctx, base);                              \
+    ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, false); \
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
     if (svr_on)                                                  \
       rex::ppc::HostToGuestFunction<function>(svr_args, base);   \
@@ -67,6 +70,7 @@ inline void CopyArgs(PPCContext &dst, const PPCContext &src) {
   extern "C" REX_FUNC(subroutine) {                              \
     PPCContext svr_args;                                         \
     ::svr::CopyArgs(svr_args, ctx);                              \
+    ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, false); \
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
     if (svr_on)                                                  \
       rex::ppc::HostToGuestFunction<function>(svr_args, base);   \
@@ -80,6 +84,7 @@ inline void CopyArgs(PPCContext &dst, const PPCContext &src) {
     PPCContext svr_args;                                         \
     ::svr::CopyArgs(svr_args, ctx);                              \
     __imp__##subroutine(ctx, base);                              \
+    ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, true); \
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
     if (svr_on)                                                  \
       function(svr_args, ctx.r3.u32, base);                      \
