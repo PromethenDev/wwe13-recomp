@@ -37,7 +37,13 @@ struct ChunkHeader {
 // 0xFF}: the game hands shader microcode and vertex elements to its Create calls once, so the recorder keeps a copy
 // of every one made since boot and writes them all at the start (and each new one before its Create call); replay
 // registers them first and skips the recorded Create calls.
-enum RecordType : uint32_t { kBasePage = 1, kFramePage = 2, kDevice = 3, kCall = 4, kFrameEnd = 5, kShader = 6, kDecl = 7 };
+// kMem {u32 space (0 virtual, 1 physical), u32 address/offset, u32 length, bytes}: memory the game wrote mid-frame
+// that a draw reads before the next frame-start scan (BeginVertices data at EndVertices, a vertex/index buffer at
+// its Unlock); written just before the call record that consumes it.
+enum RecordType : uint32_t { kBasePage = 1, kFramePage = 2, kDevice = 3, kCall = 4, kFrameEnd = 5, kShader = 6, kDecl = 7, kMem = 8, kTarget = 9 };
+// kTarget {u32 texture VA, u32 scale in quarters (4 = 1x), u32 face, u32 level, u32 width, u32 height, u32 row pitch,
+// texels}: a GPU-written texture's content at the start (after the base snapshot), e.g. reflection cubes the game
+// renders once at match load and only samples afterwards. 4-byte-per-texel formats only.
 struct RecordHeader {
   uint32_t type;
   uint32_t bytes;  // body size

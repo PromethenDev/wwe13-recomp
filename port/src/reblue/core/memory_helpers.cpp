@@ -8,7 +8,17 @@
 #include <rex/runtime.h>
 #include <rex/system/xmemory.h>
 
+#include <atomic>
+
 namespace bd::mem {
+
+namespace {
+std::atomic<bool> g_replay_physical_views{false};
+}
+
+void set_replay_physical_views(bool on) {
+  g_replay_physical_views.store(on, std::memory_order_relaxed);
+}
 
 bool ready() {
   auto *rt = rex::Runtime::instance();
@@ -24,6 +34,8 @@ void *try_translate(u32 va, u32 align) {
   if (!memory || !va || (va & (align - 1)))
     return nullptr;
 
+  if (va >= 0xA0000000u && g_replay_physical_views.load(std::memory_order_relaxed))
+    return memory->TranslateVirtual<void *>(va);
   auto *heap = memory->LookupHeap(va);
   u32 protect = 0;
   if (!heap || !heap->QueryProtect(va, &protect) ||

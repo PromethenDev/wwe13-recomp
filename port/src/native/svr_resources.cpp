@@ -557,6 +557,14 @@ GuestTexture *SvrResolveTarget(u32 texture_va, float scale) {
   return host;
 }
 
+void SvrListTargets(std::vector<SvrTargetInfo> &out) {
+  out.clear();
+  std::lock_guard lock(g_mutex);
+  for (const auto &[va, target] : g_targets)
+    if (target.host)
+      out.push_back({va, target.host, target.extent ? float(target.extent) / 4.0f : 1.0f});
+}
+
 // Presented frames, for SvrAfterResolve's per-frame target detection.
 static std::atomic<u64> g_frame_index{0};
 

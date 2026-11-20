@@ -13,7 +13,9 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <cstdlib>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #if defined(_WIN32)
@@ -35,8 +37,12 @@
 #include <rex/system/xmemory.h>
 
 #include "core/memory_helpers.h"
+#include "replay.h"
+#include "svr_geometry.h"
 #include "gpu/d3d.h"
 #include "gpu/resources.h"
+#include "gpu/device.h"
+#include "svr_resources.h"
 
 REXCVAR_DEFINE_INT32(wwe13_record_frames, 0, "WWE13",
                      "Record this many native-renderer frames for offline replay (0 = off)")
@@ -45,6 +51,9 @@ REXCVAR_DEFINE_INT32(wwe13_record_after, 0, "WWE13",
                      "Start recording after this many frames (Swaps), e.g. to skip boot and menus")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 REXCVAR_DEFINE_STRING(wwe13_record_dir, "recording", "WWE13", "Output folder for a native-renderer recording")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_STRING(wwe13_record_png, "", "WWE13",
+                      "Recorder: comma list of recorded frame indices to save as live_<n>.png (live-vs-replay check)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace svr::recorder {
@@ -175,6 +184,11 @@ struct State {
   Writer writer;
   std::vector<uint8_t> chunk;
   bool active = false, done = false, scan_pending = false, base_taken = false;
+  std::unordered_set<uint32_t> png_frames;  // wwe13_record_png
+  uint32_t png_index = 0, png_front = 0;    // a frame to save at the next hook (its Swap has run by then)
+  bool png_pending = false;
+  uint32_t bv_va = 0, bv_size = 0;  // the open BeginVertices block (its data is recorded at EndVertices)
+  uint64_t mem_records = 0, mem_bytes = 0;
   int requested = 0, frames = 0, skipped = 0;
   uint32_t device = 0;
   std::vector<uint8_t> device_copy;
@@ -331,6 +345,80 @@ const std::vector<uint8_t>* NoteCreate(State& s, const char* name, const PPCCont
   return &(s.shaders[object] = std::move(body));
 }
 
+// A kMem record of [address, address + length): space 1 = physical offset, else a virtual address.
+void PutMem(State& s, uint32_t space, uint32_t address, uint32_t length) {
+  auto* memory = REX_KERNEL_MEMORY();
+  if (!memory || !length || length > (16u << 20)) return;
+  if (space == 1 && (uint64_t(address) + length > 0x20000000ull)) return;
+  const uint8_t* src = space == 1 ? memory->physical_membase() + address
+                                  : memory->TranslateVirtual<const uint8_t*>(address);
+  std::vector<uint8_t> body(12 + size_t(length));
+  std::memcpy(body.data(), &space, 4);
+  std::memcpy(body.data() + 4, &address, 4);
+  std::memcpy(body.data() + 8, &length, 4);
+  std::memcpy(body.data() + 12, src, length);
+  PutRecord(s, kMem, body.data(), uint32_t(body.size()));
+  ++s.mem_records;
+  s.mem_bytes += length;
+}
+
+// Mid-frame writes a recorded call reads (see kMem in recorder.h).
+void NoteMidFrameWrites(State& s, const char* name, const PPCContext& args, uint32_t return_value) {
+  if (std::strcmp(name, "D3DDevice_BeginVertices") == 0) {
+    s.bv_va = return_value;
+    s.bv_size = args.r5.u32 * args.r6.u32;
+  } else if (std::strcmp(name, "D3DDevice_EndVertices") == 0) {
+    if (s.bv_va && s.bv_size) {
+      if (s.bv_va >= 0xA0000000u)
+        PutMem(s, 1, bd::gpu::SvrGpuAddress(s.bv_va) & 0x1FFFFFFFu, s.bv_size);
+      else
+        PutMem(s, 0, s.bv_va, s.bv_size);
+    }
+    s.bv_va = s.bv_size = 0;
+  } else if (std::strcmp(name, "D3DVertexBuffer_Unlock") == 0) {
+    if (const auto* vb = bd::mem::try_at<const bd::gpu::D3DVertexBuffer>(args.r3.u32)) {
+      const uint32_t address = uint32_t(vb->FetchLo) & ~3u, size = uint32_t(vb->FetchHi) & 0x03FFFFFCu;
+      if (address) PutMem(s, 1, bd::gpu::SvrGpuAddress(address) & 0x1FFFFFFFu, size);
+    }
+  } else if (std::strcmp(name, "D3DIndexBuffer_Unlock") == 0) {
+    if (const auto* ib = bd::mem::try_at<const bd::gpu::D3DIndexBuffer>(args.r3.u32)) {
+      const uint32_t address = uint32_t(ib->FetchLo), size = uint32_t(ib->FetchHi);
+      if (address) PutMem(s, 1, bd::gpu::SvrGpuAddress(address) & 0x1FFFFFFFu, size);
+    }
+  }
+}
+
+// Start-of-recording content of every GPU-written texture (kTarget, see recorder.h).
+void SnapshotTargets(State& s) {
+  std::vector<bd::gpu::SvrTargetInfo> targets;
+  bd::gpu::SvrListTargets(targets);
+  uint32_t saved = 0, skipped = 0;
+  for (const auto& t : targets) {
+    bd::gpu::GuestTexture* tex = t.host;
+    if (!tex || !tex->texture || plume::RenderFormatSize(tex->format) != 4 ||
+        tex->sampleCount != plume::RenderSampleCount::COUNT_1) {
+      ++skipped;
+      continue;
+    }
+    const uint32_t faces = tex->viewDimension == plume::RenderTextureViewDimension::TEXTURE_CUBE ? 6u : 1u;
+    for (uint32_t face = 0; face < faces; ++face) {
+      for (uint32_t level = 0; level < tex->mipLevels; ++level) {
+        std::vector<uint8_t> pixels;
+        uint32_t row_pitch = 0;
+        if (!bd::gpu::Video::ReadbackTextureLevel(tex, level, face, pixels, row_pitch)) continue;
+        const uint32_t w = std::max(1u, tex->width >> level), h = std::max(1u, tex->height >> level);
+        const uint32_t head[7] = {t.texture_va, uint32_t(t.scale * 4.0f + 0.5f), face, level, w, h, row_pitch};
+        std::vector<uint8_t> body(sizeof(head) + pixels.size());
+        std::memcpy(body.data(), head, sizeof(head));
+        std::memcpy(body.data() + sizeof(head), pixels.data(), pixels.size());
+        PutRecord(s, kTarget, body.data(), uint32_t(body.size()));
+      }
+    }
+    ++saved;
+  }
+  REXLOG_INFO("[recorder] snapshot of {} GPU-written textures ({} skipped: not 4 bytes per texel)", saved, skipped);
+}
+
 void Finish(State& s) {
   if (!s.chunk.empty()) s.writer.Submit(std::move(s.chunk));
   s.chunk.clear();
@@ -340,8 +428,9 @@ void Finish(State& s) {
   const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - s.start).count();
   REXLOG_INFO(
       "[recorder] wrote {} frames, {:.1f} MB: {} calls, {} base pages, {} changed pages, {:.1f} MB device deltas, "
-      "{:.0f} ms scanning, {:.1f} s",
-      s.frames, bytes / 1048576.0, s.calls, s.base_pages, s.frame_pages, s.device_bytes / 1048576.0, s.scan_ms, secs);
+      "{:.0f} ms scanning, {} mid-frame writes {:.1f} MB, {:.1f} s",
+      s.frames, bytes / 1048576.0, s.calls, s.base_pages, s.frame_pages, s.device_bytes / 1048576.0, s.scan_ms,
+      s.mem_records, s.mem_bytes / 1048576.0, secs);
 }
 
 void WriteMeta(const std::string& dir, uint32_t device) {
@@ -373,6 +462,17 @@ void RecordHook(const char* name, const PPCContext& args, uint32_t return_value,
       return;
     }
     s.requested = REXCVAR_GET(wwe13_record_frames);
+    {
+      const std::string list = REXCVAR_GET(wwe13_record_png);
+      size_t i = 0;
+      while (i < list.size()) {
+        size_t j = list.find(',', i);
+        if (j == std::string::npos) j = list.size();
+        const std::string tok = list.substr(i, j - i);
+        if (!tok.empty()) s.png_frames.insert(uint32_t(std::strtoul(tok.c_str(), nullptr, 10)));
+        i = j + 1;
+      }
+    }
     s.device = args.r3.u32;
     s.chunk.reserve(kChunkBytes + (1u << 20));
     s.active = true;
@@ -385,14 +485,23 @@ void RecordHook(const char* name, const PPCContext& args, uint32_t return_value,
                 dir, s.device, s.shaders.size(), s.decls.size());
     return;
   }
+  if (s.png_pending) {
+    // The renderer side of the previous Swap has run by now (SVR_HOOK_AFTER records before it).
+    s.png_pending = false;
+    svr::replay::WriteTargetPng(s.png_front,
+                                REXCVAR_GET(wwe13_record_dir) + "/live_" + std::to_string(s.png_index) + ".png");
+  }
   if (s.scan_pending) {
-    Scan(s, !s.base_taken);
+    const bool base = !s.base_taken;
+    Scan(s, base);
+    if (base) SnapshotTargets(s);
     s.base_taken = true;
     s.scan_pending = false;
   }
   if (created)
     PutRecord(s, std::strcmp(name, "D3DDevice_CreateVertexDeclaration") == 0 ? kDecl : kShader, created->data(),
               uint32_t(created->size()));
+  NoteMidFrameWrites(s, name, args, return_value);
   DeviceDelta(s);
   EventRecord event{};
   event.hook_id = HookId(name);
@@ -410,6 +519,11 @@ void RecordHook(const char* name, const PPCContext& args, uint32_t return_value,
   if (swap) {
     const uint32_t index = uint32_t(s.frames);
     PutRecord(s, kFrameEnd, &index, sizeof(index));
+    if (s.png_frames.count(index)) {
+      s.png_pending = true;
+      s.png_index = index;
+      s.png_front = args.r4.u32;  // Swap's second argument is the front buffer
+    }
     s.scan_pending = true;  // the next frame's data is written after this Swap
     if (++s.frames >= s.requested) Finish(s);
   }

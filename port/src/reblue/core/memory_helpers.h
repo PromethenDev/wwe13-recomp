@@ -66,6 +66,11 @@ inline const char *str(u32 va) {
 // True once the guest address space exists.
 bool ready();
 
+// Replay mode (src/native/replay.cpp) restores physical memory without the game ever
+// allocating it, so the physical views' heap page tables stay empty. When set, addresses in
+// those views (0xA0000000+) skip the page-table check. Never set while the game runs.
+void set_replay_physical_views(bool on);
+
 // Host pointer for va, or nullptr when va fails validation. Prefer try_at.
 void *try_translate(u32 va, u32 align);
 

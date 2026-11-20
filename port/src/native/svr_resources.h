@@ -9,6 +9,8 @@
 
 #include <rex/types.h>
 
+#include <vector>
+
 namespace bd::gpu {
 
 struct GuestTexture;
@@ -25,6 +27,15 @@ float SvrSurfaceScale(u32 surface_va);
 // scale: host pixels per guest pixel for a target made now (0 = the render scale). A resolve
 // passes its source surface's, so copies stay 1:1.
 GuestTexture *SvrResolveTarget(u32 texture_va, float scale = 0.0f);
+
+// Every GPU-written texture (resolve destination) that has a host texture now: its texture VA,
+// host texture and scale (1 = 1x). For the recorder's start-of-recording snapshot.
+struct SvrTargetInfo {
+  u32 texture_va;
+  GuestTexture *host;
+  float scale;
+};
+void SvrListTargets(std::vector<SvrTargetInfo> &out);
 // After a resolve into texture_va: also write the result into the texture's guest memory, as the
 // Xbox resolve does, for the first resolves of a 1x target (the game reads custom attire
 // composites back with the CPU to compress them). Per-frame targets stop after a few.

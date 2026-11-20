@@ -678,7 +678,8 @@ bool Video::ReadbackTextureLevel(GuestTexture *src, u32 level, u32 face,
   return true;
 }
 
-bool Video::UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32 row_pitch) {
+bool Video::UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32 row_pitch,
+                               u32 face) {
   if (!dst || !dst->texture || !rgba || level >= dst->mipLevels || (row_pitch & 255u))
     return false;
   const u32 w = std::max(1u, dst->width >> level);
@@ -706,7 +707,7 @@ bool Video::UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32
   dst->layout = plume::RenderTextureLayout::COPY_DEST;
   census::Mark(s, census::kUpload);
   s.command_list->copyTextureRegion(
-      plume::RenderTextureCopyLocation::Subresource(dst->texture, level, 0),
+      plume::RenderTextureCopyLocation::Subresource(dst->texture, level, face),
       plume::RenderTextureCopyLocation::PlacedFootprint(buffer.get(), dst->format, w, h, 1,
                                                         row_pitch / 4u));
   // The staging buffer dies with this call: let the copy finish first.

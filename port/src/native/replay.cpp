@@ -21,6 +21,7 @@
 #include <rex/system/xmemory.h>
 #include <rex/ui/window.h>
 
+#include "core/memory_helpers.h"
 #include "recorder.h"
 #include "svr_hook.h"
 
@@ -58,6 +59,7 @@ struct ReplayState {
   uint32_t calls = 0;
   std::unordered_set<uint32_t> committed;  // guest heap pages already allocated
   uint32_t alloc_failures = 0;
+  uint32_t target_failures = 0;
 };
 
 // Reads <dir>/recording.w13r into one flat byte stream: each chunk is uncompressed (miniz
@@ -148,6 +150,45 @@ void ApplyPage(ReplayState& s, const uint8_t* body, uint32_t bytes) {
   std::memcpy(base + offset, body + 8, svr::recorder::kPageBytes);
 }
 
+// Restores memory the game wrote mid-frame (kMem {space, address, length, bytes}).
+void ApplyMem(ReplayState& s, const uint8_t* body, uint32_t bytes) {
+  if (bytes < 12) return;
+  uint32_t space = 0, address = 0, length = 0;
+  std::memcpy(&space, body, 4);
+  std::memcpy(&address, body + 4, 4);
+  std::memcpy(&length, body + 8, 4);
+  if (12ull + length > bytes) return;
+  if (space == 1) {
+    if (uint64_t(address) + length > 0x20000000ull) return;
+    std::memcpy(s.memory->physical_membase() + address, body + 12, length);
+    return;
+  }
+  // A virtual address: every page it spans must be committed (ApplyPage does that for page records).
+  auto* heap = s.memory->LookupHeap(address);
+  if (!heap) return;
+  for (uint32_t a = address & ~(svr::recorder::kPageBytes - 1); a < address + length; a += svr::recorder::kPageBytes) {
+    uint32_t protect = 0;
+    if (!heap->QueryProtect(a, &protect) || !(protect & rex::memory::kMemoryProtectWrite)) return;
+  }
+  std::memcpy(s.memory->TranslateVirtual<uint8_t*>(address), body + 12, length);
+}
+
+// Restores a GPU-written texture's start-of-recording content (kTarget).
+void ApplyTarget(ReplayState& s, const uint8_t* body, uint32_t bytes) {
+  uint32_t head[7] = {};
+  if (bytes < sizeof(head)) return;
+  std::memcpy(head, body, sizeof(head));
+  const uint32_t va = head[0], quarters = head[1], face = head[2], level = head[3], w = head[4], h = head[5],
+                 row_pitch = head[6];
+  if (sizeof(head) + uint64_t(row_pitch) * h > bytes) return;
+  bd::gpu::GuestTexture* tex = bd::gpu::SvrResolveTarget(va, float(quarters) / 4.0f);
+  if (!tex || std::max(1u, tex->width >> level) != w || std::max(1u, tex->height >> level) != h) {
+    if (++s.target_failures <= 8) REXLOG_WARN("[replay] target 0x{:08X} face {} level {}: cannot restore", va, face, level);
+    return;
+  }
+  bd::gpu::Video::UploadTextureLevel(tex, level, body + sizeof(head), row_pitch, face);
+}
+
 // Restores changed bytes of the D3D device block {device, {off,len,bytes} runs}.
 void ApplyDevice(ReplayState& s, const uint8_t* body, uint32_t bytes) {
   if (bytes < 4) return;
@@ -211,29 +252,27 @@ void ApplyCall(ReplayState& s, const uint8_t* body, uint32_t bytes) {
   ++s.calls;
 }
 
-// ---- PNG (optional, cvar wwe13_replay_png) ---------------------------------
+}  // namespace
 
-// Reads the presented front buffer back and writes it as <dir>/frame_<n>.png. Best-effort:
-// the front buffer must be a 4-byte-per-texel target; the byte order follows the target's
-// format (RGBA8 here, so a BGRA8 front buffer would come out red/blue-swapped). Needs miniz
-// (the D3D12 target has it) for the zlib IDAT.
-void DumpPng(ReplayState& s, uint32_t index) {
-  if (!s.front_buffer_va) return;
-  bd::gpu::GuestTexture* tex = bd::gpu::SvrResolveTarget(s.front_buffer_va);
-  if (!tex) return;
+// ---- PNG (optional, cvar wwe13_replay_png; the recorder's wwe13_record_png) ----
+
+// Writes the 4-byte-per-texel target at guest address target_va as an RGBA PNG at path. Best-effort:
+// the byte order follows the target's format (RGBA8 here, so a BGRA8 target would come out
+// red/blue-swapped). Needs miniz (the D3D12 target has it) for the zlib IDAT.
+bool WriteTargetPng(uint32_t target_va, const std::string& path) {
+  if (!target_va) return false;
+  bd::gpu::GuestTexture* tex = bd::gpu::SvrResolveTarget(target_va);
+  if (!tex) return false;
   std::vector<uint8_t> pixels;
   uint32_t row_pitch = 0;
   if (!bd::gpu::Video::ReadbackTextureLevel(tex, 0, 0, pixels, row_pitch)) {
-    REXLOG_WARN("[replay] PNG {}: readback failed", index);
-    return;
+    REXLOG_WARN("[png] {}: readback failed", path);
+    return false;
   }
-  if (!tex->width || !tex->height || pixels.size() < size_t(row_pitch) * tex->height) return;
+  if (!tex->width || !tex->height || pixels.size() < size_t(row_pitch) * tex->height) return false;
 #if defined(W13R_INFLATE)
-  const std::string path =
-      REXCVAR_GET(wwe13_replay_dir) + "/frame_" + std::to_string(index) + ".png";
   std::FILE* f = std::fopen(path.c_str(), "wb");
-  if (!f) return;
-
+  if (!f) return false;
   const auto put32 = [](std::vector<uint8_t>& v, uint32_t x) {
     v.push_back(uint8_t(x >> 24));
     v.push_back(uint8_t(x >> 16));
@@ -282,9 +321,19 @@ void DumpPng(ReplayState& s, uint32_t index) {
     chunk("IEND", {});
   }
   std::fclose(f);
+  return true;
 #else
-  REXLOG_WARN("[replay] PNG {}: this build has no miniz, cannot write", index);
+  REXLOG_WARN("[png] {}: this build has no miniz, cannot write", path);
+  return false;
 #endif
+}
+
+namespace {
+
+// Reads the presented front buffer back and writes it as <dir>/frame_<n>.png.
+void DumpPng(ReplayState& s, uint32_t index) {
+  WriteTargetPng(s.front_buffer_va,
+                 REXCVAR_GET(wwe13_replay_dir) + "/frame_" + std::to_string(index) + ".png");
 }
 
 // Runs one pass over the record stream.
@@ -319,6 +368,12 @@ void RunPass(ReplayState& s, const std::vector<uint8_t>& stream) {
         break;
       case svr::recorder::kDevice:
         ApplyDevice(s, body, h.bytes);
+        break;
+      case svr::recorder::kMem:
+        ApplyMem(s, body, h.bytes);
+        break;
+      case svr::recorder::kTarget:
+        ApplyTarget(s, body, h.bytes);
         break;
       case svr::recorder::kCall:
         ApplyCall(s, body, h.bytes);
@@ -377,6 +432,9 @@ bool Run(rex::ui::Window* window) {
 
   ReplayState s;
   s.memory = memory;
+  // Physical memory is restored from the recording, not allocated by the game: let the checked
+  // accessors (texture headers live at 0xA0000000+) read it.
+  bd::mem::set_replay_physical_views(true);
   ParsePngList(REXCVAR_GET(wwe13_replay_png), s.png_frames);
 
   uint32_t hook_count = 0;

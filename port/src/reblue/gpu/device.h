@@ -201,7 +201,8 @@ public:
   static bool ReadbackTextureLevel(GuestTexture *src, u32 level, u32 face, std::vector<u8> &out,
                                    u32 &row_pitch);
   // Uploads RGBA8 texels (row_pitch a multiple of 256) into one level of a 4-byte texture.
-  static bool UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32 row_pitch);
+  static bool UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32 row_pitch,
+                                 u32 face = 0);
   // Resolve of a sub-rectangle (host pixels) of the current source to a point of dst's level/face,
   // as the Xbox does it. false when it cannot be a plain copy (format, MSAA, exponent bias): the
   // caller falls back to the whole-surface resolve.

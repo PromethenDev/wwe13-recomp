@@ -6,7 +6,15 @@ namespace rex::ui {
 class Window;
 }
 
+#include <cstdint>
+#include <string>
+
 namespace svr::replay {
+
+// Reads back the render target at guest address target_va (4 bytes per texel) and writes it as an
+// RGBA PNG at path. Used by replay (wwe13_replay_png) and the live recorder (wwe13_record_png) so
+// both sides of a live-vs-replay comparison come from the same readback. False if it could not.
+bool WriteTargetPng(uint32_t target_va, const std::string& path);
 
 // True when cvar wwe13_replay_dir is non-empty (replay mode chosen at startup).
 bool Enabled();
