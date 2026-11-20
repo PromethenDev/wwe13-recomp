@@ -71,6 +71,7 @@ struct GuestTexture {
   float resolveScale = 1.0f;
   u32 resolveLevel = 0;
   u32 resolveFace = 0;
+  u64 resolveSerial = 0;  // order of the last resolve into this texture (alias dedupe)
   bool registered = false;
   bool pendingDestroy = false;
   bool pendingGPURead = false;

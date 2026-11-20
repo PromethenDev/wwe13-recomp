@@ -1320,6 +1320,23 @@ void LiveAbTick() {
   static const std::string flag = REXCVAR_GET(wwe13_live_ab);
   if (flag.empty())
     return;
+  // A comma list switches several options together (a bundle).
+  static const std::vector<std::string> flags = [] {
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (i <= flag.size()) {
+      const size_t j = std::min(flag.find(',', i), flag.size());
+      if (j > i)
+        out.push_back(flag.substr(i, j - i));
+      i = j + 1;
+    }
+    return out;
+  }();
+  const auto set_all = [](bool v) {
+    for (const auto &f : flags)
+      if (!rex::cvar::SetFlagByName(f, v ? "true" : "false"))
+        BD_WARN("[ab] cannot set {}", f);
+  };
   using clock = std::chrono::steady_clock;
   static bool started = false, on = false;
   static clock::time_point seg_start, last;
@@ -1328,8 +1345,7 @@ void LiveAbTick() {
   const auto now = clock::now();
   if (!started) {
     started = true;
-    if (!rex::cvar::SetFlagByName(flag, "false"))
-      BD_WARN("[ab] cannot set {}", flag);
+    set_all(false);
     seg_start = last = now;
     ms.reserve(4096);
     return;
@@ -1353,7 +1369,7 @@ void LiveAbTick() {
           sorted[std::min(n - 1, n * 99 / 100)], slow);
   ++segment;
   on = !on;
-  rex::cvar::SetFlagByName(flag, on ? "true" : "false");
+  set_all(on);
   ms.clear();
   seg_start = now;
 }

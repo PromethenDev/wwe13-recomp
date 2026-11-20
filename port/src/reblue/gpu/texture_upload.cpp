@@ -306,6 +306,8 @@ void UploadTextureFromMapped(GuestTexture *tex) {
   // Full-subresource CPU upload replaces any deferred resolve into this
   // texture, so drop the link and a later materialization cannot clobber it.
   DetachSourceSurfaceLocked(s, tex);
+  if (!tex->destinationTextures.empty())
+    MaterializeOutboundLocked(s, tex);  // alias dedupe: keep their snapshot
 
   const u32 pitch = ComputeTexturePitch(tex);
   const u32 texel = plume::RenderFormatSize(tex->format);

@@ -281,6 +281,12 @@ bool WriteTargetPng(uint32_t target_va, const std::string& path) {
   if (!target_va) return false;
   bd::gpu::GuestTexture* tex = bd::gpu::SvrResolveTarget(target_va);
   if (!tex) return false;
+  // A deferred resolve (wwe13_resolve_alias) is still in its source surface: read what the
+  // present pass shows (SelectPresentSource substitutes the same way), not the stale texture.
+  if (tex->sourceSurface && tex->sourceSurface != tex && tex->sourceSurface->texture &&
+      tex->sourceSurface->width == tex->width && tex->sourceSurface->height == tex->height &&
+      tex->sourceSurface->format == tex->format)
+    tex = tex->sourceSurface;
   std::vector<uint8_t> pixels;
   uint32_t row_pitch = 0;
   if (!bd::gpu::Video::ReadbackTextureLevel(tex, 0, 0, pixels, row_pitch)) {

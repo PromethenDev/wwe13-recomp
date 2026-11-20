@@ -38,6 +38,9 @@
 REXCVAR_DEFINE_BOOL(wwe13_resolve_alias, false, "WWE13",
                     "Avoid full same-size, same-format single-sample resolves by aliasing the render target until its next write.")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(wwe13_resolve_alias_dedupe, false, "WWE13",
+                    "With wwe13_resolve_alias: deferred copies of the same snapshot are made once, into "
+                    "the newest destination, and the others sample that copy");
 REXCVAR_DEFINE_BOOL(wwe13_depth_alias, false, "WWE13",
                     "D3D12: sample matching D24S8 depth resolves directly until the depth buffer is written again.")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
@@ -54,6 +57,8 @@ std::atomic<u64> g_resolve_copies_done{0};
 std::chrono::steady_clock::time_point g_resolve_log_time{};
 std::atomic<u64> g_depth_copies_avoided{0};
 std::atomic<u64> g_depth_copies_done{0};
+std::atomic<u64> g_dedupe_copies_avoided{0};
+u64 g_resolve_serial = 0;  // under the video state mutex
 std::chrono::steady_clock::time_point g_depth_log_time{};
 
 void LogResolveCopyStats() {
@@ -62,9 +67,10 @@ void LogResolveCopyStats() {
       now - g_resolve_log_time < std::chrono::seconds(10))
     return;
   g_resolve_log_time = now;
-  BD_INFO("[wwe13-resolve-alias] copies avoided={} done={}",
+  BD_INFO("[wwe13-resolve-alias] copies avoided={} done={} deduped={}",
           g_resolve_copies_avoided.load(std::memory_order_relaxed),
-          g_resolve_copies_done.load(std::memory_order_relaxed));
+          g_resolve_copies_done.load(std::memory_order_relaxed),
+          g_dedupe_copies_avoided.load(std::memory_order_relaxed));
 }
 
 void LogDepthCopyStats() {
@@ -134,6 +140,9 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
   }
   if (!s.ready)
     return false;
+  // Textures that sample dst (alias dedupe) keep its current content.
+  if (!dst->destinationTextures.empty())
+    MaterializeOutboundLocked(s, dst);
   if (dst->sampleCount != plume::RenderSampleCount::COUNT_1) {
     static std::atomic<u32> s_warn{0};
     if (s_warn.fetch_add(1, std::memory_order_relaxed) < 8) {
@@ -362,6 +371,8 @@ namespace {
 
 bool ClearColorTargetLocked(VideoState &s, GuestTexture *dst,
                             plume::RenderColor color) {
+  if (dst && !dst->destinationTextures.empty())
+    MaterializeOutboundLocked(s, dst);  // alias dedupe: keep their snapshot
   if (!dst || !dst->texture || !s.ready)
     return false;
   if (IsDepthFormat(dst->format) ||
@@ -420,6 +431,37 @@ bool MaterializeOutboundLocked(VideoState &s, GuestTexture *source,
   bool recorded = false;
   std::vector<GuestTexture *> destinations(source->destinationTextures.begin(),
                                            source->destinationTextures.end());
+  // wwe13_resolve_alias_dedupe: the one-to-one destinations all hold the same snapshot. Copy it
+  // once, into the most recently resolved one (it is resolved into again last), and let the others
+  // sample that copy until it is written (CopySurfaceToTextureLocked / TrackResolveSource /
+  // ResolveRegion / uploads materialize them first).
+  if (REXCVAR_GET(wwe13_resolve_alias_dedupe) && destinations.size() > 1) {
+    GuestTexture *keep = nullptr;
+    for (GuestTexture *dst : destinations) {
+      if (!dst || dst == source || dst->sourceSurface != source || dst->pendingDestroy ||
+          !dst->destinationTextures.empty() || !CanAliasResolveLocked(source, dst) ||
+          dst->descriptorIndex == kInvalidDescriptorIndex)
+        continue;
+      if (!keep || dst->resolveSerial > keep->resolveSerial)
+        keep = dst;
+    }
+    if (keep && CopySurfaceToTextureLocked(s, source, keep, "Materialize")) {
+      recorded = true;
+      DetachSourceSurfaceLocked(s, keep);
+      for (GuestTexture *dst : destinations) {
+        if (!dst || dst == keep || dst == source || dst->sourceSurface != source ||
+            dst->pendingDestroy || !dst->destinationTextures.empty() ||
+            !CanAliasResolveLocked(source, dst))
+          continue;
+        source->destinationTextures.erase(dst);
+        dst->sourceSurface = keep;
+        keep->destinationTextures.insert(dst);
+        g_dedupe_copies_avoided.fetch_add(1, std::memory_order_relaxed);
+      }
+      BindTextureSRVLocked(s, keep);
+    }
+    destinations.assign(source->destinationTextures.begin(), source->destinationTextures.end());
+  }
   for (GuestTexture *dst : destinations) {
     if (!dst || dst == source || dst->sourceSurface != source)
       continue;
@@ -479,6 +521,9 @@ void Video::TrackResolveSource(u32 flags, GuestTexture *dst, u32 level,
   const int exp_bias = static_cast<i32>(flags) >> kResolveExponentBiasShift;
   dst->resolveScale = static_cast<float>(std::ldexp(1.0, exp_bias));
   GuestTexture *src = ResolveSourceForFlagsLocked(s, flags);
+  dst->resolveSerial = ++g_resolve_serial;
+  if (!dst->destinationTextures.empty())
+    MaterializeOutboundLocked(s, dst);  // its content is about to change
   if (!src || !src->texture || src == dst) {
     DetachSourceSurfaceLocked(s, dst);
     return;
@@ -551,6 +596,11 @@ bool Video::ResolveRegion(u32 flags, GuestTexture *dst, u32 level, u32 face, i32
   if (!s.ready)
     return false;
   GuestTexture *src = ResolveSourceForFlagsLocked(s, flags);
+  if (src && src != dst) {
+    dst->resolveSerial = ++g_resolve_serial;
+    if (!dst->destinationTextures.empty())
+      MaterializeOutboundLocked(s, dst);  // its content is about to change
+  }
   if (!src || !src->texture || src == dst || src->format != dst->format ||
       src->sampleCount != plume::RenderSampleCount::COUNT_1 ||
       dst->sampleCount != plume::RenderSampleCount::COUNT_1)
@@ -696,6 +746,8 @@ bool Video::UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32
   std::lock_guard lock(s.mutex);
   if (!s.ready)
     return false;
+  if (!dst->destinationTextures.empty())
+    MaterializeOutboundLocked(s, dst);  // alias dedupe: keep their snapshot
   auto buffer = CreateHostBuffer(s.device.get(),
                                  plume::RenderBufferDesc::UploadBuffer(u64(row_pitch) * h),
                                  "level-upload");
