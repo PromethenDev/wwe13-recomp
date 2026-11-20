@@ -25,6 +25,7 @@
 #include "src/gpu/shaders/hlsl/copy_depth_ps.hlsl.dxbc.h"
 #include "src/gpu/shaders/hlsl/copy_vs.hlsl.dxbc.h"
 #include "src/gpu/shaders/hlsl/gamma_correction_ps.hlsl.dxbc.h"
+#include "src/gpu/shaders/hlsl/gamma_correction_lite_ps.hlsl.dxbc.h"
 #include "src/gpu/shaders/hlsl/pfx_occlusion_count_ps.hlsl.dxbc.h"
 #include "src/gpu/shaders/hlsl/resolve_msaa_color_2x.hlsl.dxbc.h"
 #include "src/gpu/shaders/hlsl/resolve_msaa_color_4x.hlsl.dxbc.h"
@@ -37,6 +38,7 @@
 #include "src/gpu/shaders/hlsl/copy_depth_ps.hlsl.dxil.h"
 #include "src/gpu/shaders/hlsl/copy_vs.hlsl.dxil.h"
 #include "src/gpu/shaders/hlsl/gamma_correction_ps.hlsl.dxil.h"
+#include "src/gpu/shaders/hlsl/gamma_correction_lite_ps.hlsl.dxil.h"
 #include "src/gpu/shaders/hlsl/pfx_occlusion_count_ps.hlsl.dxil.h"
 #include "src/gpu/shaders/hlsl/resolve_msaa_color_2x.hlsl.dxil.h"
 #include "src/gpu/shaders/hlsl/resolve_msaa_color_4x.hlsl.dxil.h"
@@ -49,6 +51,7 @@
 #include "src/gpu/shaders/hlsl/copy_depth_ps.hlsl.spirv.h"
 #include "src/gpu/shaders/hlsl/copy_vs.hlsl.spirv.h"
 #include "src/gpu/shaders/hlsl/gamma_correction_ps.hlsl.spirv.h"
+#include "src/gpu/shaders/hlsl/gamma_correction_lite_ps.hlsl.spirv.h"
 #include "src/gpu/shaders/hlsl/pfx_occlusion_count_ps.hlsl.spirv.h"
 #include "src/gpu/shaders/hlsl/resolve_msaa_color_2x.hlsl.spirv.h"
 #include "src/gpu/shaders/hlsl/resolve_msaa_color_4x.hlsl.spirv.h"
@@ -256,10 +259,13 @@ bool BuildCopyPipeline(VideoState &s) {
                                            "main", kHostShaderFormat);
   s.gamma_correction_ps = s.device->createShader(
       REBLUE_SHADER_BLOB(gamma_correction_ps), "main", kHostShaderFormat);
+  s.gamma_correction_lite_ps = s.device->createShader(
+      REBLUE_SHADER_BLOB(gamma_correction_lite_ps), "main", kHostShaderFormat);
   s.occlusion_count_ps = s.device->createShader(
       REBLUE_SHADER_BLOB(pfx_occlusion_count_ps), "main", kHostShaderFormat);
   if (!s.copy_vs || !s.copy_color_ps || !s.copy_depth_ps ||
-      !s.gamma_correction_ps || !s.occlusion_count_ps) {
+      !s.gamma_correction_ps || !s.gamma_correction_lite_ps ||
+      !s.occlusion_count_ps) {
     BD_ERROR("Plume createShader for copy helpers failed");
     return false;
   }
@@ -309,6 +315,16 @@ bool BuildCopyPipeline(VideoState &s) {
       CreateHostGraphicsPipeline(s.device.get(), pipe_desc, "gamma-correction");
   if (!s.gamma_correction_pipeline) {
     BD_ERROR("Plume createGraphicsPipeline for gamma_correction failed");
+    return false;
+  }
+
+  // Lite present variant (wwe13_present_lite): FXAA off, no sRGB decode, pow
+  // skipped when the ramp is identity. Same layout/blend, just a smaller PS.
+  pipe_desc.pixelShader = s.gamma_correction_lite_ps.get();
+  s.gamma_correction_lite_pipeline =
+      CreateHostGraphicsPipeline(s.device.get(), pipe_desc, "gamma-correction-lite");
+  if (!s.gamma_correction_lite_pipeline) {
+    BD_ERROR("Plume createGraphicsPipeline for gamma_correction_lite failed");
     return false;
   }
 

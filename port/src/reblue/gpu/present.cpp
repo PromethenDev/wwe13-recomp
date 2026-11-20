@@ -25,6 +25,8 @@
 
 #include <plume_render_interface.h>
 
+#include <rex/cvar.h>
+
 #include "gpu/gpu_profiling.h"
 
 #include "core/logging.h"
@@ -40,6 +42,14 @@ bool Wwe12LoadTurboSkipPresent();  // native/wwe12_load_turbo.cpp
 void SvrGuestGammaRamp(float& gamma, float& scale);  // native/wwe13_gamma.cpp: brightness
 unsigned SvrFxaaLevel();  // native/wwe13_gamma.cpp: svr_fxaa
 #endif
+
+// Present pass with the default-settings dead code stripped (wwe13_present_lite): FXAA off
+// (svr_fxaa = 0) and the X360 sRGB decode unreachable in the native renderer leave the full
+// gamma_correction_ps with an unused Fxaa() (8 extra samples) and an unused decode branch. The
+// lite variant keeps the same sample, pow and scale, so the picture is byte-for-byte identical.
+REXCVAR_DEFINE_BOOL(wwe13_present_lite, false, "WWE13",
+                    "Cheaper present pass: FXAA-free / no-sRGB-decode pixel shader (svr_fxaa = 0)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace bd::gpu {
 
@@ -270,7 +280,16 @@ void RecordPresentPass(VideoState &s, GuestTexture *rt,
   constexpr float kPresentGamma = 1.0f;
   constexpr float kPresentDisplayCorrection = 1.0f;
 #endif
-  s.command_list->setPipeline(s.gamma_correction_pipeline.get());
+  // The lite variant assumes the native-renderer scale path (Param1 < 0) and no FXAA; pick it only
+  // then. It still applies pow for a non-identity ramp, so the picture is identical to the full
+  // shader whenever svr_fxaa = 0.
+#if defined(SVR_NATIVE_RENDERER)
+  const bool present_lite = REXCVAR_GET(wwe13_present_lite) && fxaa_level == 0;
+#else
+  const bool present_lite = false;
+#endif
+  s.command_list->setPipeline(present_lite ? s.gamma_correction_lite_pipeline.get()
+                                           : s.gamma_correction_pipeline.get());
   struct PresentPushConstants {
     u32 descriptor_index;
     u32 descriptor_index_2;

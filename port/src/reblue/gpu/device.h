@@ -344,6 +344,10 @@ struct VideoState {
   std::unique_ptr<plume::RenderPipeline> copy_color_pipeline;
   std::unique_ptr<plume::RenderPipeline> gamma_correction_pipeline;
   std::unique_ptr<plume::RenderShader> gamma_correction_ps;
+  // FXAA-free / sRGB-decode-free present variant (wwe13_present_lite): same
+  // sample, pow and scale as gamma_correction_ps with the dead code removed.
+  std::unique_ptr<plume::RenderPipeline> gamma_correction_lite_pipeline;
+  std::unique_ptr<plume::RenderShader> gamma_correction_lite_ps;
   // Exponent of the guest's scanout gamma ramp, captured by the
   // bdBuildGammaRampLUT hook: BD uploads ramp(x) = x^((2-sub)*mul/2) via
   // SetGammaRamp, default settings give x^0.5. Applied at present.

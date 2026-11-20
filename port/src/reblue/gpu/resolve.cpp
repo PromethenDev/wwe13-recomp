@@ -38,6 +38,9 @@
 REXCVAR_DEFINE_BOOL(wwe13_resolve_alias, false, "WWE13",
                     "Avoid full same-size, same-format single-sample resolves by aliasing the render target until its next write.")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_BOOL(wwe13_depth_alias, false, "WWE13",
+                    "D3D12: sample matching D24S8 depth resolves directly until the depth buffer is written again.")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace bd::gpu {
 
@@ -49,6 +52,9 @@ inline const plume::RenderTexture *const kDepthFbKey =
 std::atomic<u64> g_resolve_copies_avoided{0};
 std::atomic<u64> g_resolve_copies_done{0};
 std::chrono::steady_clock::time_point g_resolve_log_time{};
+std::atomic<u64> g_depth_copies_avoided{0};
+std::atomic<u64> g_depth_copies_done{0};
+std::chrono::steady_clock::time_point g_depth_log_time{};
 
 void LogResolveCopyStats() {
   const auto now = std::chrono::steady_clock::now();
@@ -61,12 +67,43 @@ void LogResolveCopyStats() {
           g_resolve_copies_done.load(std::memory_order_relaxed));
 }
 
+void LogDepthCopyStats() {
+  const auto now = std::chrono::steady_clock::now();
+  if (g_depth_log_time.time_since_epoch().count() != 0 &&
+      now - g_depth_log_time < std::chrono::seconds(10))
+    return;
+  g_depth_log_time = now;
+  BD_INFO("[wwe13-depth-alias] copies avoided={} done={}",
+          g_depth_copies_avoided.load(std::memory_order_relaxed),
+          g_depth_copies_done.load(std::memory_order_relaxed));
+}
+
 GuestTexture *ResolveSourceForFlagsLocked(VideoState &s, u32 flags) {
   if (flags & kResolveDepthStencil)
     return s.depth_stencil;
   if (s.render_target)
     return s.render_target;
   return s.back_buffer_surface;
+}
+
+bool CanAliasDepthResolveLocked(const VideoState &s, const GuestTexture *src,
+                                const GuestTexture *dst) {
+#if defined(REBLUE_D3D12) && !defined(REBLUE_D3D11)
+  return REXCVAR_GET(wwe13_depth_alias) && src && dst && src == s.depth_stencil &&
+         src != dst && src->texture && dst->texture &&
+         src->format == plume::RenderFormat::D24_UNORM_S8_UINT &&
+         dst->format == plume::RenderFormat::R32_FLOAT &&
+         src->sampleCount == plume::RenderSampleCount::COUNT_1 &&
+         src->width == dst->width && src->height == dst->height &&
+         dst->resolveScale == 1.0f && dst->viewDimension !=
+             plume::RenderTextureViewDimension::TEXTURE_CUBE &&
+         dst->mipLevels <= 1 && src->descriptorIndex != kInvalidDescriptorIndex;
+#else
+  (void)s;
+  (void)src;
+  (void)dst;
+  return false;
+#endif
 }
 
 bool CanAliasResolveLocked(const GuestTexture *src, const GuestTexture *dst) {
@@ -299,6 +336,13 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
     g_resolve_copies_done.fetch_add(1, std::memory_order_relaxed);
     LogResolveCopyStats();
   }
+#if defined(REBLUE_D3D12) && !defined(REBLUE_D3D11)
+  if (REXCVAR_GET(wwe13_depth_alias) && src == s.depth_stencil &&
+      dst->format == plume::RenderFormat::R32_FLOAT) {
+    g_depth_copies_done.fetch_add(1, std::memory_order_relaxed);
+    LogDepthCopyStats();
+  }
+#endif
   plume::RenderTextureBarrier post(dst->texture,
                                    plume::RenderTextureLayout::SHADER_READ);
   s.command_list->barriers(plume::RenderBarrierStage::GRAPHICS, &post, 1);
@@ -459,6 +503,15 @@ void Video::ResolveRtToTexture(GuestTexture *dst) {
   GuestTexture *src = dst->sourceSurface;
   if (!src || src == dst || !src->texture)
     return;
+
+  if (CanAliasDepthResolveLocked(s, src, dst)) {
+    g_depth_copies_avoided.fetch_add(1, std::memory_order_relaxed);
+    LogDepthCopyStats();
+    s.last_resolved_dst = dst;
+    NoteTileContentLocked(s, dst);
+    s.draw_framebuffer_bound = false;
+    return;
+  }
 
   if (CanAliasResolveLocked(src, dst)) {
     if (REXCVAR_GET(wwe13_resolve_alias)) {

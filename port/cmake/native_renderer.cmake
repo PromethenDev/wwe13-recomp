@@ -211,7 +211,7 @@ endfunction()
 foreach(shader IN ITEMS copy_vs imgui_vs)
     wwe13_host_shader(${shader} vs_6_0)
 endforeach()
-foreach(shader IN ITEMS copy_color_ps copy_depth_ps gamma_correction_ps pfx_occlusion_count_ps
+foreach(shader IN ITEMS copy_color_ps copy_depth_ps gamma_correction_ps gamma_correction_lite_ps pfx_occlusion_count_ps
         imgui_ps resolve_msaa_color_2x resolve_msaa_color_4x resolve_msaa_color_8x
         resolve_msaa_depth_2x resolve_msaa_depth_4x resolve_msaa_depth_8x)
     wwe13_host_shader(${shader} ps_6_0)
