@@ -121,6 +121,10 @@ set(WWE13_DXCOMPILER_DLL "${WWE13_XENOS_DIR}/thirdparty/dxc-bin/bin/x64/dxcompil
 # SPIR-V backend), and to DXBC headers (D3D11) with the Windows SDK's fxc. The HLSL keeps its
 # Vulkan-only parts under #ifdef __spirv__.
 set(WWE13_DXC "${WWE13_XENOS_DIR}/thirdparty/dxc-bin/bin/x64/dxc.exe")
+if(NOT CMAKE_HOST_WIN32)
+    # Linux cross-build (xwin): the Linux DXC of the same dxc-bin, through a wrapper for its libdxcompiler.so.
+    set(WWE13_DXC "${WWE13_NATIVE_ROOT}/tools/dxc-linux.sh" "${WWE13_XENOS_DIR}/thirdparty/dxc-bin")
+endif()
 set(WWE13_HLSL_DIR "${WWE13_NATIVE_ROOT}/src/reblue/gpu/shaders/hlsl")
 set(WWE13_HOST_SHADER_HEADERS "")
 set(WWE13_HOST_SHADER_HEADERS_DXIL "")
@@ -144,7 +148,7 @@ function(wwe13_host_shader STEM PROFILE)
     set(out "${WWE13_NATIVE_GEN}/src/gpu/shaders/hlsl/${STEM}.hlsl.spirv.h")
     add_custom_command(
         OUTPUT "${out}"
-        COMMAND "${WWE13_DXC}" -T ${PROFILE} -HV 2021 -all-resources-bound -Wno-ignored-attributes
+        COMMAND ${WWE13_DXC} -T ${PROFILE} -HV 2021 -all-resources-bound -Wno-ignored-attributes
                 ${args} -I "${WWE13_NATIVE_ROOT}" -Fh "${out}" "${WWE13_HLSL_DIR}/${STEM}.hlsl"
                 -Vn g_${STEM}_spirv
         DEPENDS "${WWE13_HLSL_DIR}/${STEM}.hlsl" ${hlsl_includes}
@@ -155,7 +159,7 @@ function(wwe13_host_shader STEM PROFILE)
         set(out_dxil "${WWE13_NATIVE_GEN}/src/gpu/shaders/hlsl/${STEM}.hlsl.dxil.h")
         add_custom_command(
             OUTPUT "${out_dxil}"
-            COMMAND "${WWE13_DXC}" -T ${PROFILE} -HV 2021 -all-resources-bound
+            COMMAND ${WWE13_DXC} -T ${PROFILE} -HV 2021 -all-resources-bound
                     -Wno-ignored-attributes -I "${WWE13_NATIVE_ROOT}" -Fh "${out_dxil}"
                     "${WWE13_HLSL_DIR}/${STEM}.hlsl" -Vn g_${STEM}_dxil
             DEPENDS "${WWE13_HLSL_DIR}/${STEM}.hlsl" ${hlsl_includes}
