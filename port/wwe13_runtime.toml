@@ -1,5 +1,6 @@
 # WWE '13 PC runtime settings, copied beside the exe as wwe13.toml (the SDK reads <exe>\wwe13.toml).
-# Keyboard layout and language of the original project's release (keys: L = A, K = B, Escape = Start).
+# Keyboard layout of the original project's release (keys: L = A, K = B, Escape = Start). No user_language:
+# the game starts in English until the player picks a language in the launcher (it writes the key here).
 
 keybind_a = "L"
 keybind_b = "K"
@@ -25,7 +26,6 @@ keybind_dpad_left = "Left"
 keybind_dpad_right = "Right"
 keybind_back = "Tab"
 keybind_start = "Escape"
-user_language = 4
 
 # Vulkan backend of the Xenos plugin (until the native renderer, docs/NATIVE_PORT_PLAN.md).
 gpu_backend = "vulkan"

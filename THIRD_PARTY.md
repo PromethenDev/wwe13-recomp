@@ -4,6 +4,8 @@
   ([PromethenDev/wwe13-recomp](https://github.com/PromethenDev/wwe13-recomp)), BSD 3-Clause (notice kept in
   `LICENSE.BSD-3-Clause-PromethenDev`). This fork builds on their recompilation, launcher, SDK patches and
   research; the project as a whole is GPL-3.0 (`LICENSE`).
+- **WWE '13 fork, SDK 0.10 port and native renderers** (Vulkan, Direct3D 12, Direct3D 11) by **iMrBurn**
+  (GPL-3.0), released jointly with PromethenDev from v1.6. The native renderers are experimental.
 - **Native renderer** (from the WWE '12 PC project, iMrBurn/wwe12-pc, GPL-3.0): re:Blue (zolaware, BSD-3)
   and plume (zolaware, MIT), adapted from nefariousjosiah's WWE SmackDown vs. Raw 2008-2010 recomp ports
   (GPL-3.0, derived from the UnleashedRecomp line); XenosRecomp (hedge-dev) for shader conversion.

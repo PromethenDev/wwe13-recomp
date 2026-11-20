@@ -2,7 +2,7 @@
 
 An unofficial static recompilation of the **Xbox 360 version of WWE '13** for 64-bit Windows and Linux. The original PowerPC game code is translated ahead of time to C++ and built into a native executable using the ReXGlue SDK; this is not an Xbox 360 emulator.
 
-**Latest release: v1.1** (2026-10-04) – new Content page in the launcher, Ministry Undertaker freeze fix and more. See [CHANGELOG.md](CHANGELOG.md).
+**Latest release: v1.6** – native renderers (Vulkan, DirectX 12, DirectX 11; **experimental**), much faster on weak graphics. See [RELEASE-NOTES-v1.6.md](RELEASE-NOTES-v1.6.md) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Before you download
 
@@ -18,13 +18,14 @@ You must own a legally obtained Xbox 360 copy of WWE '13 and supply the game fil
 
 - **Windows 10 or 11 (64-bit)**, or **Linux** (glibc 2.38 or newer, e.g. Ubuntu 24.04, with GTK3; on Wayland the game window runs through XWayland, installed by default on most distributions). **Steam Deck** and Proton: see [docs/LINUX_STEAM_DECK.md](docs/LINUX_STEAM_DECK.md).
 - **CPU**: a 64-bit processor with AVX2 (most PCs from 2013 onward: Intel Haswell / AMD Ryzen or newer).
-- **Graphics**: a graphics card with up-to-date Vulkan drivers. On integrated graphics, choose 480p.
+- **Graphics**: a graphics card with up-to-date Vulkan, DirectX 12 or DirectX 11 drivers. On integrated graphics, choose 480p or 720p.
+- **Microsoft Visual C++ Redistributable 2015-2022 (x64)** (Windows). Most PCs already have it; if the game reports that `MSVCP140.dll` or `VCRUNTIME140.dll` is missing, install it from Microsoft.
 - About 10 GB of free space for the game files.
 
 ## Install and play
 
-1. Download `WWE13-Recomp-v1.5.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
-2. Start **`WWE13 Launcher.exe`** (Linux: `Linux-x86_64/wwe13-launcher`).
+1. Download `WWE13-Recomp-v1.6-x64.zip` and extract it to a normal folder such as Documents or Desktop (not `C:\Program Files`).
+2. Start **`WWE13 Launcher.exe`**.
 3. In **Game files**, do one of the following:
    - put your game folder in the `WWE 13` folder beside the launcher, or
    - press **Find Automatically** to search this PC, or
@@ -37,12 +38,13 @@ The launcher checks every file and shows **Game files ready** when everything is
 ```text
 WWE13-Recomp-x64/
 ├── WWE13 Launcher.exe          # start here (Windows)
-├── wwe13.exe                   # the game (started by the launcher)
+├── wwe13_native.exe            # the game, native renderer: Vulkan (experimental)
+├── wwe13_d3d12.exe, wwe13_d3d11.exe  # the game, native renderer: DirectX 12 / 11 (experimental)
+├── wwe13.exe                   # the game, Emulated (Xenos) renderer
+├── rexruntime.dll, rexgpu-xenos.dll  # shared runtime
 ├── wwe13.toml                  # keyboard keys (change them on the launcher's Controls page)
-├── avcodec-58.dll, avutil-56.dll
-├── shader-cache/               # pre-built graphics data so the game starts quickly
-├── Linux-x86_64/               # Linux launcher + game
 ├── README.md, DISCLAIMER.md, LICENSE, SHA256SUMS
+├── RELEASE-NOTES-v1.6.md, THIRD_PARTY.md
 ├── licenses/, third-party-licenses/, ffmpeg-source-*.zip
 ├── WWE 13/                     # your game folder (default.xex + default.xexp + data)
 ├── userdata/                   # saves, DLC and settings (created on first run)
@@ -75,6 +77,7 @@ cannot reach GitHub, it says nothing and starts normally.
 
 - **Resolution** – the sharpness the game renders at. 480p is the fastest (handhelds and integrated graphics); 720p is the original Xbox 360 sharpness; 1440p needs a strong graphics card.
 - **Frame rate** – *Classic* (60 in matches, 30 in entrances and cutscenes, like the console), *60 Everywhere* (needs a strong PC), or *30 Locked* (steady, best for laptops and handhelds).
+- **Graphics API** – **Automatic (experimental)** (the default), **Vulkan**, **DirectX 12** or **DirectX 11** draw the picture natively and are much faster on weak graphics; they are **experimental**: if a scene looks wrong or the game crashes, choose **Emulated (Xenos)**, the renderer of v1.5 and earlier.
 - **Display** – fullscreen or windowed; **Graphics card** – for PCs with two GPUs.
 - **Stretch to fill wide screens** – fill a 21:9 or 16:10 screen instead of showing black bars (the 16:9 picture is stretched). **Sync frames to the monitor** – on by default; Windows only, turn it off if fullscreen stutters on a high refresh rate or FreeSync / G-SYNC monitor.
 - **Language** – the language of the game's menus and text: English, German, French, Spanish or Italian. Commentary stays English. It is saved in `wwe13.toml` and takes effect the next time the game starts.
@@ -103,6 +106,8 @@ Some older entrance packages use title ID `54510890` rather than WWE '13's `5451
 
 ## Known issues
 
+- The **native renderers** (Vulkan, DirectX 12, DirectX 11) are **experimental**: some scenes may still look wrong or crash. Choose **Emulated (Xenos)** in Settings if that happens, and please report it.
+- The native renderers are Windows only for now; on Linux, keep using v1.5.
 - **1080p** is hidden in the launcher for now: at that resolution the crowd can show glitches.
 - Some shadow and lighting differences remain compared to the console.
 - **480p**: the reversal button prompt that appears over a wrestler is drawn too far up and to the left. 720p and higher are not affected.
