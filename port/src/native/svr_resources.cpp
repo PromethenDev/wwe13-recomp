@@ -1332,10 +1332,16 @@ void LiveAbTick() {
     }
     return out;
   }();
+  // "name=value": on sets value, off sets 0 (numeric options); plain name: true / false.
   const auto set_all = [](bool v) {
-    for (const auto &f : flags)
-      if (!rex::cvar::SetFlagByName(f, v ? "true" : "false"))
-        BD_WARN("[ab] cannot set {}", f);
+    for (const auto &f : flags) {
+      const size_t eq = f.find('=');
+      const std::string name = eq == std::string::npos ? f : f.substr(0, eq);
+      const std::string value = eq == std::string::npos ? (v ? "true" : "false")
+                                                        : (v ? f.substr(eq + 1) : "0");
+      if (!rex::cvar::SetFlagByName(name, value))
+        BD_WARN("[ab] cannot set {}={}", name, value);
+    }
   };
   using clock = std::chrono::steady_clock;
   static bool started = false, on = false;
