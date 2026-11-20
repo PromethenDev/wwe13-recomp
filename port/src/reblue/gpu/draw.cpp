@@ -358,7 +358,22 @@ bool Video::FlushRenderState(u32 device_guest) {
   return FlushRenderStateLocked(device_guest);
 }
 
+extern bool g_draw_profile;
+extern std::atomic<u64> g_flush_prof_ns[5];  // pipeline, vs consts, ps consts, shared consts, rest
+std::atomic<u64> g_flush_prof_ns[5]{};
+namespace {
+inline u64 FlushNow() { return u64(std::chrono::steady_clock::now().time_since_epoch().count()); }
+}  // namespace
+
 bool Video::FlushRenderStateLocked(u32 device_guest) {
+  const u64 fp0 = g_draw_profile ? FlushNow() : 0;
+  u64 fp_mark = fp0;
+  const auto fp = [&](int i) {
+    if (!fp0) return;
+    const u64 now = FlushNow();
+    g_flush_prof_ns[i].fetch_add(now - fp_mark, std::memory_order_relaxed);
+    fp_mark = now;
+  };
   auto &s = state();
   // A confirmed device-removed event is terminal: stop recording so the render
   // thread cannot race the fatal dialog into a crash.
@@ -478,6 +493,7 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
   // constants are still live and the 4 KiB byte swap upload can be skipped.
   // Vulkan push offsets 0/8/16 follow the guest PushConstants member order
   // emitted by the recompiler.
+  fp(0);  // everything up to here: state fold, render state, scissor, pipeline lookup/bind
   if (device_guest) {
 #if defined(SVR_NATIVE_RENDERER)
     // SvR 2008: its engine also writes constants straight into the device (inline XDK
@@ -498,6 +514,7 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
       }
     }
 
+    fp(1);
     if (s.dirtyStates.pixelShaderConstants) {
 #if defined(SVR_NATIVE_RENDERER)
       const bool zero_dof = !REXCVAR_GET(wwe12_dof) && IsDepthOfFieldShader(s.pixel_shader);
@@ -520,6 +537,7 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
     // fetch constants are written by unhooked recompiled code, so there is no
     // dirty signal. The upload is skipped internally when the built block is
     // byte-identical to the one already bound on this list.
+    fp(2);
     auto sc_alloc = UploadSharedConstants(device_guest);
     if (sc_alloc.size) {
 #if defined(REBLUE_D3D12)
@@ -532,6 +550,7 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
     }
   }
 
+  fp(3);
   // Lens flare occlusion count: the counter UAV (root descriptor 3 on D3D12,
   // set 4 on Vulkan) for the sun test quad draw bracketed by D3DQuery_Issue
   // BEGIN/END. The pipeline cache swaps occlusion_count_ps in while counting.
@@ -567,6 +586,7 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
   }
 
   s.dirtyStates = DirtyStates(false);
+  fp(4);
   return true;
 }
 

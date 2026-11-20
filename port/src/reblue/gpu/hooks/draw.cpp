@@ -21,6 +21,7 @@
 
 #include <fmt/format.h>
 
+#include <chrono>
 #include <rex/cvar.h>
 #include <rex/graphics/xenos.h>
 #include <rex/hook.h>
@@ -79,9 +80,28 @@ REXCVAR_DEFINE_BOOL(svr_edge_blur, false, "SvR",
 #include "gpu/output.h"
 #include "gpu/shaders/shader_cache.h"
 
+// Replay CPU profile of the draw path (svr::replay sets g_draw_profile): ns per section.
+namespace bd::gpu {
+bool g_draw_profile = false;
+std::atomic<u64> g_draw_prof_ns[6]{};  // geometry, pre, framebuffer, flush, record, draws
+}  // namespace bd::gpu
+
 namespace {
 
 namespace xe = rex::graphics::xenos;
+inline u64 ProfNow() {
+  return u64(std::chrono::steady_clock::now().time_since_epoch().count());
+}
+struct DrawProfSection {
+  int idx;
+  u64 t0;
+  explicit DrawProfSection(int i) : idx(i), t0(bd::gpu::g_draw_profile ? ProfNow() : 0) {}
+  void end() {
+    if (t0) bd::gpu::g_draw_prof_ns[idx].fetch_add(ProfNow() - t0, std::memory_order_relaxed);
+    t0 = 0;
+  }
+  ~DrawProfSection() { end(); }
+};
 
 struct DrawArgs {
   bool indexed = false;
@@ -126,6 +146,8 @@ plume::RenderPrimitiveTopology MapPrimitiveType(u32 prim) {
 void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
                   const DrawArgs &args = {}) {
   WWE12_CPU_ZONE(kDraws);
+  if (bd::gpu::g_draw_profile) bd::gpu::g_draw_prof_ns[5].fetch_add(1, std::memory_order_relaxed);
+  DrawProfSection prof_pre(1);
 #if defined(SVR_NATIVE_RENDERER)
   // A clear the Xbox did after resolving this surface's tiles, due now that it is drawn again.
   if (const auto *dev = bd::mem::at<const bd::gpu::D3DDevice>(device_guest)) {
@@ -282,12 +304,20 @@ void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
       s.dirtyStates.pipelineState, s.pipelineState.primitiveTopology,
       MapPrimitiveType(primitive_type));
 
-  if (!bd::gpu::Video::BindDrawFramebufferLocked()) {
-    return;
+  prof_pre.end();
+  {
+    DrawProfSection prof(2);
+    if (!bd::gpu::Video::BindDrawFramebufferLocked()) {
+      return;
+    }
   }
-  if (!bd::gpu::Video::FlushRenderStateLocked(device_guest)) {
-    return; // FlushRenderState logs its own reason
+  {
+    DrawProfSection prof(3);
+    if (!bd::gpu::Video::FlushRenderStateLocked(device_guest)) {
+      return; // FlushRenderState logs its own reason
+    }
   }
+  DrawProfSection prof_record(4);
 
   auto *cmd_list = s.command_list;
   bd::gpu::census::Mark(s, bd::gpu::census::kDraw, s.bound_fb_rt ? s.bound_fb_rt : s.bound_fb_ds);
@@ -703,7 +733,10 @@ u32 D3DDevice_DrawIndexedVertices_hook(u32 device_guest, u32 primitiveType,
 #if defined(SVR_NATIVE_RENDERER)
   // Streams and indices exactly as SvR's D3D left them in the device for this draw (its own
   // SetStreamSource/SetIndices are not observed any more).
-  bd::gpu::SvrBindDrawGeometry(device_guest, /*indexed=*/true);
+  {
+    DrawProfSection prof(0);
+    bd::gpu::SvrBindDrawGeometry(device_guest, /*indexed=*/true);
+  }
 #endif
   DrawArgs args{};
   args.indexed = true;

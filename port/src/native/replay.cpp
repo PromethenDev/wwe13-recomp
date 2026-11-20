@@ -5,6 +5,7 @@
 #include "replay.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -53,6 +54,12 @@ REXCVAR_DEFINE_STRING(wwe13_replay_ab, "", "WWE13",
                       "Replay in-run A/B: name of a bool option set false on even loops and true on "
                       "odd loops; with the GPU census, each loop logs its own labelled totals")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
+namespace bd::gpu {
+extern bool g_draw_profile;
+extern std::atomic<uint64_t> g_draw_prof_ns[6];
+extern std::atomic<uint64_t> g_flush_prof_ns[5];
+}  // namespace bd::gpu
 
 namespace svr::replay {
 
@@ -475,6 +482,7 @@ bool Run(rex::ui::Window* window) {
   // Physical memory is restored from the recording, not allocated by the game: let the checked
   // accessors (texture headers live at 0xA0000000+) read it.
   bd::mem::set_replay_physical_views(true);
+  bd::gpu::g_draw_profile = true;
   ParsePngList(REXCVAR_GET(wwe13_replay_png), s.png_frames);
   if (const std::string skip = REXCVAR_GET(wwe13_replay_skip); !skip.empty()) {
     if (std::FILE* f = std::fopen(skip.c_str(), "r")) {
@@ -516,6 +524,8 @@ bool Run(rex::ui::Window* window) {
       // Loop 0 builds pipelines and uploads textures: profile the warm loops only.
       s.hook_ms.clear();
       s.pages_ms = s.mem_ms = s.device_ms = s.other_ms = 0;
+      for (auto& v : bd::gpu::g_draw_prof_ns) v.store(0);
+      for (auto& v : bd::gpu::g_flush_prof_ns) v.store(0);
       profile_frames_skip += s.frames;
     }
     total_frames += s.frames;
@@ -533,6 +543,17 @@ bool Run(rex::ui::Window* window) {
       order.push_back({v.first, name});
     }
     std::sort(order.rbegin(), order.rend());
+    {
+      const double draws = double(std::max<uint64_t>(1, bd::gpu::g_draw_prof_ns[5].load()));
+      const auto us = [&](int i) { return double(bd::gpu::g_draw_prof_ns[i].load()) / 1000.0 / draws; };
+      REXLOG_INFO("[replay-cpu] per draw (us): geometry {:.2f} | pre {:.2f} | framebuffer {:.2f} | "
+                  "flush state {:.2f} | record {:.2f} ({:.0f} draws/frame)",
+                  us(0), us(1), us(2), us(3), us(4), draws / nf);
+      const auto fus = [&](int i) { return double(bd::gpu::g_flush_prof_ns[i].load()) / 1000.0 / draws; };
+      REXLOG_INFO("[replay-cpu] flush state per draw (us): state+pipeline {:.2f} | VS consts {:.2f} | "
+                  "PS consts {:.2f} | shared consts {:.2f} | streams/rest {:.2f}",
+                  fus(0), fus(1), fus(2), fus(3), fus(4));
+    }
     REXLOG_INFO("[replay-cpu] per frame: hooks {:.2f} ms | pages {:.2f} | kMem {:.2f} | device {:.2f} | other {:.2f}",
                 hooks / nf, s.pages_ms / nf, s.mem_ms / nf, s.device_ms / nf, s.other_ms / nf);
     for (const auto& [ms, name] : order)
