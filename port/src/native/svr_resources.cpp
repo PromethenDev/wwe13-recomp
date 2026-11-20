@@ -1306,8 +1306,62 @@ static void LoadStatsTick() {
   last_mirror_ns = mirror_ns, last_pso = pso, last_frame = frame;
 }
 
+// ---- live in-run A/B (test tool) ------------------------------------------------------------
+// Separate 4-minute runs on the UHD 630 differ by up to 2 fps with the same settings; switching the
+// option inside one run and comparing neighbouring segments removes that. Off by default.
+REXCVAR_DEFINE_STRING(wwe13_live_ab, "", "WWE13",
+                      "Live in-run A/B: name of a bool option toggled every wwe13_live_ab_seconds "
+                      "(off first); each segment logs its frame times as an [ab] line");
+REXCVAR_DEFINE_INT32(wwe13_live_ab_seconds, 10, "WWE13", "Live in-run A/B segment length")
+    .range(2, 600);
+
+namespace {
+void LiveAbTick() {
+  static const std::string flag = REXCVAR_GET(wwe13_live_ab);
+  if (flag.empty())
+    return;
+  using clock = std::chrono::steady_clock;
+  static bool started = false, on = false;
+  static clock::time_point seg_start, last;
+  static std::vector<float> ms;
+  static u32 segment = 0;
+  const auto now = clock::now();
+  if (!started) {
+    started = true;
+    if (!rex::cvar::SetFlagByName(flag, "false"))
+      BD_WARN("[ab] cannot set {}", flag);
+    seg_start = last = now;
+    ms.reserve(4096);
+    return;
+  }
+  ms.push_back(std::chrono::duration<float, std::milli>(now - last).count());
+  last = now;
+  const double secs = std::chrono::duration<double>(now - seg_start).count();
+  if (secs < double(REXCVAR_GET(wwe13_live_ab_seconds)))
+    return;
+  std::vector<float> sorted = ms;
+  std::sort(sorted.begin(), sorted.end());
+  double sum = 0;
+  u32 slow = 0;
+  for (float v : ms) {
+    sum += v;
+    slow += v > 33.4f;
+  }
+  const size_t n = sorted.size();
+  BD_INFO("[ab] seg {} {}={} {:.1f} s: {} frames, {:.2f} fps, median {:.2f} ms, p99 {:.2f} ms, >33ms {}",
+          segment, flag, on ? "on" : "off", secs, n, n / secs, sorted[n / 2],
+          sorted[std::min(n - 1, n * 99 / 100)], slow);
+  ++segment;
+  on = !on;
+  rex::cvar::SetFlagByName(flag, on ? "true" : "false");
+  ms.clear();
+  seg_start = now;
+}
+}  // namespace
+
 void SvrOnFrame() {
   SvrWatchdogHeartbeat();
+  LiveAbTick();
   const u64 frame = g_frame.fetch_add(1, std::memory_order_relaxed);
   g_frame_index.store(frame, std::memory_order_relaxed);
   SvrProcessDeferredReadbacks(frame);
