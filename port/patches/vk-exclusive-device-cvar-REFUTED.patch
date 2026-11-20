@@ -1,0 +1,33 @@
+diff --git a/port/src/reblue/gpu/device.cpp b/port/src/reblue/gpu/device.cpp
+index 4c4275d..de2492e 100644
+--- a/port/src/reblue/gpu/device.cpp
++++ b/port/src/reblue/gpu/device.cpp
+@@ -60,9 +60,18 @@ namespace plume {
+ extern std::unique_ptr<RenderInterface> CreateD3D12Interface();
+ #else
+ extern std::unique_ptr<RenderInterface> CreateVulkanInterface();
++extern bool VulkanFullScreenExclusive;  // plume-fullscreen-exclusive.patch
+ #endif
+ } // namespace plume
+ 
++#if !defined(REBLUE_D3D11) && !defined(REBLUE_D3D12) && defined(_WIN32)
++REXCVAR_DEFINE_BOOL(wwe13_vk_exclusive, false, "WWE13",
++                    "Vulkan: application-controlled full-screen exclusive swapchain "
++                    "(VK_EXT_full_screen_exclusive), so the driver flips instead of composing "
++                    "through the desktop (Intel UHD 630 composes a borderless window).")
++    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
++#endif
++
+ REXCVAR_DEFINE_STRING(svr_gpu_device, "", "SvR",
+                       "Vulkan name of the GPU to render with (empty = the most capable)");
+ 
+@@ -353,6 +362,9 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
+     // D3D12Core.dll that ends up owning the device.
+     const bool dred_armed = EnableDred();
+ #else
++#if defined(_WIN32)
++    plume::VulkanFullScreenExclusive = REXCVAR_GET(wwe13_vk_exclusive);
++#endif
+     s.render_iface = plume::CreateVulkanInterface();
+     if (!s.render_iface) {
+       BD_ERROR("Plume CreateVulkanInterface failed");

@@ -1,0 +1,252 @@
+diff --git a/port/src/native/svr_resources.cpp b/port/src/native/svr_resources.cpp
+index 704a871..c7f9867 100644
+--- a/port/src/native/svr_resources.cpp
++++ b/port/src/native/svr_resources.cpp
+@@ -1413,4 +1413,118 @@ GuestTexture *SvrResolveTexture(u32 texture_va) {
+   return check.host ? check.host : TargetWithSameMemory(texture_va);
+ }
+ 
++// ---- wwe13_skip_unread_targets ---------------------------------------------------------------
++// Offline evidence (recorder + replay, 11-20): 20 64x64 targets per frame in a match are resolved
++// and never bound or presented; skipping them left the replayed picture byte-identical. The rule is
++// history-based, so a read after skipping started is logged (the content is then stale).
++REXCVAR_DEFINE_BOOL(wwe13_skip_unread_targets, false, "WWE13",
++                    "Skip resolves into targets nothing has read for 120+ frames in a row, and the "
++                    "draws and clears that only feed them (default off; logs mispredicts)");
++
++namespace {
++struct UnreadTarget {
++  u32 va = 0;
++  u64 last_frame = ~0ull;
++  u32 frames = 0;
++  bool read = false;
++  bool skipping = false;
++};
++constexpr u32 kUnreadFrames = 120;
++std::mutex g_unread_mutex;
++std::unordered_map<const GuestTexture *, UnreadTarget> g_unread;
++std::unordered_map<u32, u8> g_read_vas;          // texture headers bound or presented
++std::unordered_map<u32, u64> g_dead_surfaces;    // surface va -> frame of its last skipped resolve
++std::atomic<u32> g_unread_logged{0};
++std::atomic<u32> g_unread_mispredicts{0};
++
++bool UnreadEnabled() {
++  static const bool on = REXCVAR_GET(wwe13_skip_unread_targets);
++  return on;
++}
++
++void LogMispredict(const char *what, u32 va) {
++  const u32 n = g_unread_mispredicts.fetch_add(1, std::memory_order_relaxed);
++  if (n < 32)
++    BD_WARN("[svr] skip-unread MISPREDICT #{}: {} 0x{:08X} (frame {})", n + 1, what, va,
++            g_frame_index.load(std::memory_order_relaxed));
++}
++}  // namespace
++
++void SvrNoteTextureRead(const GuestTexture *tex, u32 texture_va) {
++  if (!UnreadEnabled() || !texture_va)
++    return;
++  std::lock_guard lock(g_unread_mutex);
++  g_read_vas[texture_va] = 1;
++  if (!tex)
++    return;
++  const auto it = g_unread.find(tex);
++  if (it == g_unread.end()) {
++    g_unread[tex].read = true;
++    return;
++  }
++  if (it->second.skipping)
++    LogMispredict("target read after its resolves were skipped", it->second.va);
++  it->second.read = true;
++  it->second.skipping = false;
++}
++
++bool SvrSkipUnreadResolve(u32 dst_va, const GuestTexture *dst, u32 flags, u32 level, u32 face,
++                          u32 rt_va, u32 ds_va) {
++  if (!UnreadEnabled())
++    return false;
++  const u64 frame = g_frame_index.load(std::memory_order_relaxed);
++  std::lock_guard lock(g_unread_mutex);
++  bool skip = false;
++  // Clearing resolves (0x300) and other levels/faces always run.
++  if (dst && !(flags & 0x300u) && level == 0 && face == 0 && !g_read_vas.count(dst_va)) {
++    UnreadTarget &u = g_unread[dst];
++    if (u.va != dst_va)
++      u = UnreadTarget{};  // a new target in a reused host object
++    u.va = dst_va;
++    if (!u.read) {
++      if (u.last_frame != frame) {
++        u.frames = (u.last_frame + 1 == frame) ? u.frames + 1 : 1;
++        u.last_frame = frame;
++      }
++      skip = u.frames >= kUnreadFrames;
++      if (skip && !u.skipping && g_unread_logged.fetch_add(1, std::memory_order_relaxed) < 64)
++        BD_INFO("[svr] skip-unread: target 0x{:08X} {}x{} (surface 0x{:08X}) unread for {} frames, "
++                "its resolves are skipped from frame {}",
++                dst_va, dst->width, dst->height, rt_va, u.frames, frame);
++      u.skipping = skip;
++    }
++  }
++  if (skip) {
++    if (rt_va)
++      g_dead_surfaces[rt_va] = frame;
++    if (ds_va)
++      g_dead_surfaces[ds_va] = frame;
++    return true;
++  }
++  // A surface whose draws were being skipped now feeds a live copy: those draws were needed.
++  for (const u32 sv : {rt_va, ds_va}) {
++    if (!sv)
++      continue;
++    const auto it = g_dead_surfaces.find(sv);
++    if (it == g_dead_surfaces.end())
++      continue;
++    if (it->second + 1 >= frame)
++      LogMispredict("surface with skipped draws resolved into a live target", sv);
++    g_dead_surfaces.erase(it);
++  }
++  return false;
++}
++
++bool SvrSkipDeadSurfaceWork(u32 rt0, u32 rt1, u32 rt2, u32 rt3, u32 ds) {
++  if (!UnreadEnabled() || !rt0 || rt1 || rt2 || rt3)
++    return false;
++  const u64 frame = g_frame_index.load(std::memory_order_relaxed);
++  std::lock_guard lock(g_unread_mutex);
++  const auto dead = [&](u32 sv) {
++    const auto it = g_dead_surfaces.find(sv);
++    return it != g_dead_surfaces.end() && it->second + 1 >= frame;
++  };
++  return dead(rt0) && (!ds || dead(ds));
++}
++
+ }  // namespace bd::gpu
+diff --git a/port/src/native/svr_resources.h b/port/src/native/svr_resources.h
+index debef5f..4f1235f 100644
+--- a/port/src/native/svr_resources.h
++++ b/port/src/native/svr_resources.h
+@@ -42,6 +42,14 @@ void SvrListTargets(std::vector<SvrTargetInfo> &out);
+ void SvrAfterResolve(u32 texture_va, GuestTexture *dst, u32 level, u32 face);
+ // Guest texture bound for sampling -> host texture (a resolve target, else a mirror).
+ GuestTexture *SvrResolveTexture(u32 texture_va);
++
++// wwe13_skip_unread_targets (default off). A target resolved on many frames in a row that nothing
++// has ever bound or presented is not copied, and draws/clears into the surfaces that only feed it
++// are skipped. A later read of such a target is logged as a mispredict.
++void SvrNoteTextureRead(const GuestTexture *tex, u32 texture_va);
++bool SvrSkipUnreadResolve(u32 dst_va, const GuestTexture *dst, u32 flags, u32 level, u32 face,
++                          u32 rt_va, u32 ds_va);
++bool SvrSkipDeadSurfaceWork(u32 rt0, u32 rt1, u32 rt2, u32 rt3, u32 ds);
+ // Called once per presented frame (mirror checks are per frame).
+ void SvrOnFrame();
+ 
+diff --git a/port/src/reblue/gpu/device.cpp b/port/src/reblue/gpu/device.cpp
+index 4c4275d..de2492e 100644
+--- a/port/src/reblue/gpu/device.cpp
++++ b/port/src/reblue/gpu/device.cpp
+@@ -60,9 +60,18 @@ namespace plume {
+ extern std::unique_ptr<RenderInterface> CreateD3D12Interface();
+ #else
+ extern std::unique_ptr<RenderInterface> CreateVulkanInterface();
++extern bool VulkanFullScreenExclusive;  // plume-fullscreen-exclusive.patch
+ #endif
+ } // namespace plume
+ 
++#if !defined(REBLUE_D3D11) && !defined(REBLUE_D3D12) && defined(_WIN32)
++REXCVAR_DEFINE_BOOL(wwe13_vk_exclusive, false, "WWE13",
++                    "Vulkan: application-controlled full-screen exclusive swapchain "
++                    "(VK_EXT_full_screen_exclusive), so the driver flips instead of composing "
++                    "through the desktop (Intel UHD 630 composes a borderless window).")
++    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
++#endif
++
+ REXCVAR_DEFINE_STRING(svr_gpu_device, "", "SvR",
+                       "Vulkan name of the GPU to render with (empty = the most capable)");
+ 
+@@ -353,6 +362,9 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
+     // D3D12Core.dll that ends up owning the device.
+     const bool dred_armed = EnableDred();
+ #else
++#if defined(_WIN32)
++    plume::VulkanFullScreenExclusive = REXCVAR_GET(wwe13_vk_exclusive);
++#endif
+     s.render_iface = plume::CreateVulkanInterface();
+     if (!s.render_iface) {
+       BD_ERROR("Plume CreateVulkanInterface failed");
+diff --git a/port/src/reblue/gpu/hooks/device.cpp b/port/src/reblue/gpu/hooks/device.cpp
+index b8dd13f..a115807 100644
+--- a/port/src/reblue/gpu/hooks/device.cpp
++++ b/port/src/reblue/gpu/hooks/device.cpp
+@@ -49,6 +49,12 @@ u32 D3DDevice_Clear_hook([[maybe_unused]] u32 device, [[maybe_unused]] u32 count
+ #if defined(SVR_NATIVE_RENDERER)
+   bd::gpu::SvrDrawLogClear(device, count, rects, flags, color);
+   const auto *dev = bd::mem::at<const bd::gpu::D3DDevice>(device);
++  // wwe13_skip_unread_targets: a clear of surfaces that only feed unread targets.
++  if (dev && bd::gpu::SvrSkipDeadSurfaceWork(
++                 u32(dev->renderTargetShadow[0]), u32(dev->renderTargetShadow[1]),
++                 u32(dev->renderTargetShadow[2]), u32(dev->renderTargetShadow[3]),
++                 u32(dev->depthStencilShadow)))
++    return 0;
+   if (dev)
+     bd::gpu::SvrNoteGameClear(u32(dev->renderTargetShadow[0]), float(z), stencil);
+   // D3D Clear with rects clears only those (guest pixels; the host target is scaled).
+@@ -120,6 +126,7 @@ u32 D3DDevice_Swap_hook(u32 /*device*/, u32 front_buffer_va,
+   if (present_override)
+     front_buffer_va = present_override;
+   auto *front_buffer = bd::gpu::SvrResolveTarget(front_buffer_va);
++  bd::gpu::SvrNoteTextureRead(front_buffer, front_buffer_va);  // presenting reads it
+   {
+     // WWE '13 bring-up: which texture Swap receives and whether the renderer knows it (first 8, then
+     // every 600th call).
+diff --git a/port/src/reblue/gpu/hooks/draw.cpp b/port/src/reblue/gpu/hooks/draw.cpp
+index 4d838b8..6927151 100644
+--- a/port/src/reblue/gpu/hooks/draw.cpp
++++ b/port/src/reblue/gpu/hooks/draw.cpp
+@@ -154,6 +154,19 @@ void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
+   // list they all write is single-producer.
+   auto &s = bd::gpu::state();
+   std::unique_lock<std::mutex> lock(s.mutex);
++#if defined(SVR_NATIVE_RENDERER)
++  // wwe13_skip_unread_targets: draws into surfaces that only feed unread targets (never inside an
++  // occlusion query: its pixel count is read by the game).
++  if (!s.occlusion_counting) {
++    if (const auto *dev = bd::mem::at<const bd::gpu::D3DDevice>(device_guest)) {
++      if (bd::gpu::SvrSkipDeadSurfaceWork(
++              u32(dev->renderTargetShadow[0]), u32(dev->renderTargetShadow[1]),
++              u32(dev->renderTargetShadow[2]), u32(dev->renderTargetShadow[3]),
++              u32(dev->depthStencilShadow)))
++        return;
++    }
++  }
++#endif
+   bd::gpu::Video::OpenCommandListLocked();
+ 
+ #if defined(SVR_NATIVE_RENDERER)
+@@ -738,6 +751,15 @@ u32 D3DDevice_Resolve_hook(u32 device_guest, u32 Flags, u32 pSourceRect,
+                                    u32(r->right), u32(r->bottom));
+   }
+   auto *dst = bd::gpu::SvrResolveTarget(pDestTexture, source_scale);
++  if (dst) {
++    // wwe13_skip_unread_targets: a copy nothing reads (depth resolves read the depth surface).
++    if (const auto *dev = bd::mem::at<const bd::gpu::D3DDevice>(device_guest)) {
++      const u32 rt = (Flags & 0x4u) ? 0u : u32(dev->renderTargetShadow[0]);
++      if (bd::gpu::SvrSkipUnreadResolve(pDestTexture, dst, Flags, DestLevel, DestSliceOrFace, rt,
++                                        u32(dev->depthStencilShadow)))
++        return 0;
++    }
++  }
+ #else
+   auto *dst =
+       bd::gpu::HostResourceHeap::FromGuest<bd::gpu::GuestTexture>(pDestTexture);
+diff --git a/port/src/reblue/gpu/hooks/state.cpp b/port/src/reblue/gpu/hooks/state.cpp
+index 4f0aa07..38d5ca0 100644
+--- a/port/src/reblue/gpu/hooks/state.cpp
++++ b/port/src/reblue/gpu/hooks/state.cpp
+@@ -248,6 +248,7 @@ void D3DDevice_SetVertexDeclaration_hook(u32 /*device*/, u32 decl_guest) {
+ void D3DDevice_SetTexture_hook(u32 /*device*/, u32 sampler, u32 texture_guest) {
+ #if defined(SVR_NATIVE_RENDERER)
+   auto *tex = bd::gpu::SvrResolveTexture(texture_guest);
++  bd::gpu::SvrNoteTextureRead(tex, texture_guest);  // wwe13_skip_unread_targets
+ #else
+   auto *tex = bd::gpu::ResolveGuestTexture(texture_guest);
+ #endif
