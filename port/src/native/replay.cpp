@@ -26,6 +26,7 @@
 #include "svr_hook.h"
 
 #include "gpu/device.h"
+#include "gpu/gpu_census.h"
 #include "svr_resources.h"
 
 #if __has_include(<miniz.h>)
@@ -45,6 +46,11 @@ REXCVAR_DEFINE_INT32(wwe13_replay_loops, 1, "WWE13",
 REXCVAR_DEFINE_STRING(wwe13_replay_skip, "", "WWE13",
                       "Replay experiment: file of D3DDevice_Resolve ordinals (0-based, one per line, "
                       "per pass) whose calls are skipped; tests an offline copy-liveness list")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
+REXCVAR_DEFINE_STRING(wwe13_replay_ab, "", "WWE13",
+                      "Replay in-run A/B: name of a bool option set false on even loops and true on "
+                      "odd loops; with the GPU census, each loop logs its own labelled totals")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace svr::replay {
@@ -468,11 +474,22 @@ bool Run(rex::ui::Window* window) {
   const int loops = std::max(1, REXCVAR_GET(wwe13_replay_loops));
   uint64_t total_frames = 0, total_calls = 0;
   const auto t0 = std::chrono::steady_clock::now();
+  const std::string ab = REXCVAR_GET(wwe13_replay_ab);
   for (int i = 0; i < loops; ++i) {
     s.frames = 0;
     s.calls = 0;
     s.resolve_ordinal = 0;
+    if (!ab.empty() && !rex::cvar::SetFlagByName(ab, (i & 1) ? "true" : "false"))
+      REXLOG_ERROR("[replay] A/B: cannot set {}", ab);
+    const auto l0 = std::chrono::steady_clock::now();
     RunPass(s, stream);
+    if (!ab.empty()) {
+      const double lms = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - l0).count() / std::max(1u, s.frames);
+      const std::string label = "loop " + std::to_string(i) + " " + ab + "=" + ((i & 1) ? "on" : "off") + ": ";
+      REXLOG_INFO("[replay] {}{:.1f} ms/frame", label, lms);
+      bd::gpu::census::Flush(label.c_str());
+    }
     total_frames += s.frames;
     total_calls += s.calls;
   }

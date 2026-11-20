@@ -185,8 +185,23 @@ void OnSlotRetired(VideoState &s, u32 index) {
   slot.overflow = false;
 }
 
-void OnPresent() {
+namespace {
+bool g_manual_windows = false;  // Flush() owns the windows (replay in-run A/B)
+void LogWindowLocked(Census &c, const char *label);
+}  // namespace
+
+void Flush(const char *label) {
   if (!Enabled())
+    return;
+  Census &c = C();
+  std::lock_guard lock(c.mutex);
+  g_manual_windows = true;
+  if (c.frames)
+    LogWindowLocked(c, label);
+}
+
+void OnPresent() {
+  if (!Enabled() || g_manual_windows)
     return;
   Census &c = C();
   const auto now = std::chrono::steady_clock::now();
@@ -200,12 +215,17 @@ void OnPresent() {
   std::lock_guard lock(c.mutex);
   if (!c.frames)
     return;
+  LogWindowLocked(c, "");
+}
+
+namespace {
+void LogWindowLocked(Census &c, const char *label) {
   const double n = double(c.frames);
   double total = 0;
   for (double v : c.ns)
     total += v;
-  BD_INFO("[census] {} frames: GPU {:.2f} ms/frame recorded, {:.2f} ms between lists, {} overflows",
-          c.frames, total / n / 1e6, c.between_lists_ns / n / 1e6, c.overflows);
+  BD_INFO("[census] {}{} frames: GPU {:.2f} ms/frame recorded, {:.2f} ms between lists, {} overflows",
+          label, c.frames, total / n / 1e6, c.between_lists_ns / n / 1e6, c.overflows);
   std::vector<std::pair<double, u32>> order;
   for (u32 k = 0; k < kKeys; ++k)
     if (c.ns[k] > 0)
@@ -241,6 +261,7 @@ void OnPresent() {
   c.frames = 0;
   c.overflows = 0;
 }
+}  // namespace
 }  // namespace bd::gpu::census
 
 #else  // Vulkan / D3D11 builds: no census
@@ -251,6 +272,7 @@ void Mark(VideoState &, Kind, const GuestTexture *, const GuestTexture *) {}
 void OnListEnd(VideoState &) {}
 void OnSlotRetired(VideoState &, u32) {}
 void OnPresent() {}
+void Flush(const char *) {}
 }  // namespace bd::gpu::census
 
 #endif

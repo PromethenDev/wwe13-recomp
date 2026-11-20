@@ -37,5 +37,7 @@ void OnListEnd(VideoState &s);
 void OnSlotRetired(VideoState &s, u32 slot);
 // Once per presented frame.
 void OnPresent();
+// Log and reset the totals now, labelled; from then on only Flush logs (replay in-run A/B).
+void Flush(const char *label);
 }  // namespace census
 }  // namespace bd::gpu
