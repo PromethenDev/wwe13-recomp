@@ -56,11 +56,17 @@ float SvrRenderScale();
 // Frames presented so far, plus 1 (never 0); per-frame mirror checks compare against it.
 u64 SvrFrameIndex();
 
+struct GuestVertexElement;
+
 // Shaders and vertex declarations stay the game's own D3D objects; each one the game creates is
 // given a host counterpart (shared between objects with the same microcode / elements).
 void SvrOnShaderCreated(u32 shader_va, u32 function_va, bool pixel);
+// Same, from a copy of the shader container (recorder replay: the game's buffer may be gone by then).
+void SvrRegisterShaderContainer(u32 shader_va, const void *container, bool pixel);
 GuestShader *SvrLookupShader(u32 shader_va);
 void SvrOnVertexDeclarationCreated(u32 decl_va, u32 elements_va);
+// Same, from a copy of the elements (terminated by stream 0xFF; recorder replay).
+void SvrRegisterVertexDeclaration(u32 decl_va, const GuestVertexElement *elements);
 GuestVertexDeclaration *SvrLookupVertexDeclaration(u32 decl_va);
 
 }  // namespace bd::gpu

@@ -50,6 +50,16 @@ inline void CopyArgs(PPCContext &dst, const PPCContext &src) {
 
 }  // namespace svr
 
+namespace svr::recorder {
+// Replay entry for a BEFORE/AFTER hook: re-translate the recorded registers into the
+// function's typed arguments exactly as the hook's own HostToGuestFunction call does.
+// return_value is ignored (the renderer side of these hooks drops it).
+template <auto Fn>
+void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
+  rex::ppc::HostToGuestFunction<Fn>(args, base);
+}
+}  // namespace svr::recorder
+
 // The game's function, then the renderer's (with the same arguments; its return value is dropped,
 // the game's stays in r3).
 #define SVR_HOOK_AFTER(subroutine, function)                     \
@@ -62,7 +72,11 @@ inline void CopyArgs(PPCContext &dst, const PPCContext &src) {
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
     if (svr_on)                                                  \
       rex::ppc::HostToGuestFunction<function>(svr_args, base);   \
-  }
+  }                                                              \
+  static const bool _svr_reg_##subroutine =                       \
+      ::svr::recorder::RegisterHook(#subroutine,                 \
+                                    &::svr::recorder::ReplayCall<function>, \
+                                    ::svr::recorder::HookKind::kCall) != nullptr
 
 // The renderer's function (reading the state the call is about to consume), then the game's.
 #define SVR_HOOK_BEFORE(subroutine, function)                    \
@@ -75,7 +89,11 @@ inline void CopyArgs(PPCContext &dst, const PPCContext &src) {
     if (svr_on)                                                  \
       rex::ppc::HostToGuestFunction<function>(svr_args, base);   \
     __imp__##subroutine(ctx, base);                              \
-  }
+  }                                                              \
+  static const bool _svr_reg_##subroutine =                       \
+      ::svr::recorder::RegisterHook(#subroutine,                 \
+                                    &::svr::recorder::ReplayCall<function>, \
+                                    ::svr::recorder::HookKind::kCall) != nullptr
 
 // The game's function, then the renderer's with the arguments and the game's return value (r3).
 #define SVR_HOOK_RESULT(subroutine, function)                    \
@@ -88,4 +106,8 @@ inline void CopyArgs(PPCContext &dst, const PPCContext &src) {
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
     if (svr_on)                                                  \
       function(svr_args, ctx.r3.u32, base);                      \
-  }
+  }                                                              \
+  static const bool _svr_reg_##subroutine =                       \
+      ::svr::recorder::RegisterHook(#subroutine,                 \
+                                    function,                   \
+                                    ::svr::recorder::HookKind::kResult) != nullptr

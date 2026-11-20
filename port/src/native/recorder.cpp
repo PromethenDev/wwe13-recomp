@@ -34,6 +34,10 @@
 #include <rex/system/kernel_state.h>
 #include <rex/system/xmemory.h>
 
+#include "core/memory_helpers.h"
+#include "gpu/d3d.h"
+#include "gpu/resources.h"
+
 REXCVAR_DEFINE_INT32(wwe13_record_frames, 0, "WWE13",
                      "Record this many native-renderer frames for offline replay (0 = off)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
@@ -49,6 +53,44 @@ uint32_t HookId(const char* name) {
   uint32_t h = 2166136261u;
   for (; *name; ++name) h = (h ^ static_cast<uint8_t>(*name)) * 16777619u;
   return h;
+}
+
+namespace {
+// Replay hook table: populated by the SVR_HOOK_* macros at static-init time, read
+// by the replay. A Meyers singleton so registration order across TUs never matters.
+struct HookRegistry {
+  std::mutex mutex;
+  std::vector<HookEntry> entries;
+};
+HookRegistry& R() {
+  static HookRegistry r;
+  return r;
+}
+}  // namespace
+
+const HookEntry* RegisterHook(const char* name, ReplayHookFn fn, HookKind kind) {
+  if (!name || !fn) return nullptr;
+  HookRegistry& r = R();
+  std::lock_guard lock(r.mutex);
+  for (const HookEntry& e : r.entries)
+    if (std::strcmp(e.name, name) == 0) return &e;
+  r.entries.push_back(HookEntry{HookId(name), name, fn, kind});
+  return &r.entries.back();
+}
+
+const HookEntry* FindHook(uint32_t id) {
+  HookRegistry& r = R();
+  std::lock_guard lock(r.mutex);
+  for (const HookEntry& e : r.entries)
+    if (e.id == id) return &e;
+  return nullptr;
+}
+
+void ForEachHook(const std::function<void(const HookEntry&)>& visitor) {
+  if (!visitor) return;
+  HookRegistry& r = R();
+  std::lock_guard lock(r.mutex);
+  for (const HookEntry& e : r.entries) visitor(e);
 }
 
 namespace {
@@ -136,6 +178,7 @@ struct State {
   int requested = 0, frames = 0, skipped = 0;
   uint32_t device = 0;
   std::vector<uint8_t> device_copy;
+  std::unordered_map<uint32_t, std::vector<uint8_t>> shaders, decls;  // object -> kShader / kDecl body
   std::unordered_map<uint64_t, uint64_t> page_hash;  // (space << 32 | offset) -> XXH3
   uint64_t base_pages = 0, frame_pages = 0, device_bytes = 0, calls = 0;
   double scan_ms = 0;
@@ -260,6 +303,34 @@ void DeviceDelta(State& s) {
   }
 }
 
+// Keeps a copy of a created shader / vertex declaration (from boot, while recording is enabled).
+const std::vector<uint8_t>* NoteCreate(State& s, const char* name, const PPCContext& args, uint32_t object) {
+  const bool vs = std::strcmp(name, "D3DDevice_CreateVertexShader") == 0;
+  const bool ps = std::strcmp(name, "D3DDevice_CreatePixelShader") == 0;
+  const bool decl = std::strcmp(name, "D3DDevice_CreateVertexDeclaration") == 0;
+  if ((!vs && !ps && !decl) || !object) return nullptr;
+  std::vector<uint8_t> body(8);
+  std::memcpy(body.data(), &object, 4);
+  if (decl) {
+    const auto* e = bd::mem::at<const bd::gpu::GuestVertexElement>(args.r3.u32);
+    if (!e) return nullptr;
+    uint32_t n = 0;
+    while (n < 64 && uint16_t(e[n].stream) != 0xFF) ++n;
+    ++n;  // the terminator
+    std::memcpy(body.data() + 4, &n, 4);
+    body.insert(body.end(), reinterpret_cast<const uint8_t*>(e), reinterpret_cast<const uint8_t*>(e + n));
+    return &(s.decls[object] = std::move(body));
+  }
+  const auto* c = bd::mem::at<const bd::gpu::ShaderContainer>(args.r3.u32);
+  if (!c) return nullptr;
+  const uint32_t length = uint32_t(c->virtualSize) + uint32_t(c->physicalSize);
+  if (length < sizeof(bd::gpu::ShaderContainer) || length > (4u << 20)) return nullptr;
+  const uint32_t pixel = ps ? 1u : 0u;
+  std::memcpy(body.data() + 4, &pixel, 4);
+  body.insert(body.end(), reinterpret_cast<const uint8_t*>(c), reinterpret_cast<const uint8_t*>(c) + length);
+  return &(s.shaders[object] = std::move(body));
+}
+
 void Finish(State& s) {
   if (!s.chunk.empty()) s.writer.Submit(std::move(s.chunk));
   s.chunk.clear();
@@ -287,6 +358,7 @@ void RecordHook(const char* name, const PPCContext& args, uint32_t return_value,
   State& s = S();
   std::lock_guard lock(s.mutex);
   if (s.done) return;
+  const std::vector<uint8_t>* created = has_return ? NoteCreate(s, name, args, return_value) : nullptr;
   const bool swap = std::strcmp(name, "D3DDevice_Swap") == 0;
   if (!s.active) {
     // Start at a frame boundary: the first Swap; its device argument is the D3D device.
@@ -307,7 +379,10 @@ void RecordHook(const char* name, const PPCContext& args, uint32_t return_value,
     s.scan_pending = true;
     s.start = std::chrono::steady_clock::now();
     WriteMeta(dir, s.device);
-    REXLOG_INFO("[recorder] recording {} frames to {} (device 0x{:08X})", s.requested, dir, s.device);
+    for (const auto& [obj, body] : s.shaders) PutRecord(s, kShader, body.data(), uint32_t(body.size()));
+    for (const auto& [obj, body] : s.decls) PutRecord(s, kDecl, body.data(), uint32_t(body.size()));
+    REXLOG_INFO("[recorder] recording {} frames to {} (device 0x{:08X}, {} shaders, {} declarations)", s.requested,
+                dir, s.device, s.shaders.size(), s.decls.size());
     return;
   }
   if (s.scan_pending) {
@@ -315,6 +390,9 @@ void RecordHook(const char* name, const PPCContext& args, uint32_t return_value,
     s.base_taken = true;
     s.scan_pending = false;
   }
+  if (created)
+    PutRecord(s, std::strcmp(name, "D3DDevice_CreateVertexDeclaration") == 0 ? kDecl : kShader, created->data(),
+              uint32_t(created->size()));
   DeviceDelta(s);
   EventRecord event{};
   event.hook_id = HookId(name);

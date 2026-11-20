@@ -19,12 +19,14 @@
 // re:Blue draws through plume (Vulkan, Direct3D 12 or Direct3D 11) from the game's own D3D calls
 // instead of emulating the Xenos GPU (from WWE 2K15 PC and WWE '12 PC).
 #include <cstdlib>
+#include <thread>
 #if defined(_WIN32)
 #include <windows.h>
 #endif
 #include <rex/system/gpu_plugin.h>
 #include "gpu/device.h"
 #include "gpu/imgui_overlay_drawer.h"
+#include "replay.h"
 #if defined(WWE13_RUNTIME_SHADERS) && !defined(WWE13_BUILTIN_SPIRV)
 bool Wwe13DxcUsable();  // native/wwe13_shader_cache.cpp
 #endif
@@ -63,6 +65,23 @@ class Wwe13App : public rex::ReXApp {
     StartNativeRenderer();
 #endif
   }
+
+#if defined(SVR_NATIVE_RENDERER)
+  // Replay mode (cvar wwe13_replay_dir): never launch the game. Bring the host renderer up on
+  // this (main) thread the way the game would (StartNativeRenderer, in case OnPreLaunchModule
+  // has not run yet), then run the recording on a dedicated thread that plays the guest thread's
+  // role. replay::Run blocks that thread and requests a clean exit when done.
+  void LaunchModule() override {
+    if (svr::replay::Enabled()) {
+      if (!bd::gpu::Video::HostDevice())
+        StartNativeRenderer();
+      rex::ui::Window* w = window();
+      std::thread([w] { svr::replay::Run(w); }).detach();
+      return;
+    }
+    rex::ReXApp::LaunchModule();
+  }
+#endif
 
 #if defined(SVR_NATIVE_RENDERER)
   void OnPreSetup(rex::RuntimeConfig& config) override {

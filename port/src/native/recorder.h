@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <rex/ppc/context.h>
 
 // WWE '13 native-renderer recorder (cvar wwe13_record_frames, default 0 = off), for offline replay.
@@ -32,7 +33,11 @@ struct ChunkHeader {
   uint32_t raw_bytes;
   uint32_t stored_bytes;
 };
-enum RecordType : uint32_t { kBasePage = 1, kFramePage = 2, kDevice = 3, kCall = 4, kFrameEnd = 5 };
+// kShader {u32 shader object, u32 pixel, container bytes} / kDecl {u32 declaration object, elements up to stream
+// 0xFF}: the game hands shader microcode and vertex elements to its Create calls once, so the recorder keeps a copy
+// of every one made since boot and writes them all at the start (and each new one before its Create call); replay
+// registers them first and skips the recorded Create calls.
+enum RecordType : uint32_t { kBasePage = 1, kFramePage = 2, kDevice = 3, kCall = 4, kFrameEnd = 5, kShader = 6, kDecl = 7 };
 struct RecordHeader {
   uint32_t type;
   uint32_t bytes;  // body size
@@ -48,4 +53,35 @@ struct EventRecord {
 // FNV-1a of the hooked subroutine name: stable across builds and backends.
 uint32_t HookId(const char* name);
 void RecordHook(const char* name, const PPCContext& args, uint32_t return_value, bool has_return);
+
+// --- Replay hook table -----------------------------------------------------
+// The SVR_HOOK_* macros register the renderer side of every hook here, keyed by
+// HookId(name), so the replay can run it from the recorded registers without the
+// game. The registration happens in the same translation unit as the (often
+// file-static) renderer function, so nothing needs to become externally visible.
+enum class HookKind : uint32_t { kCall = 0, kResult = 1 };
+
+// A renderer entry the replay invokes with the recorded registers. For kCall (a
+// BEFORE/AFTER hook) the trampoline ignores return_value and re-translates the
+// registers through HostToGuestFunction; for kResult (a RESULT hook) the observer
+// reads return_value directly. Same shape either way.
+using ReplayHookFn = void (*)(PPCContext& args, uint32_t return_value, uint8_t* base);
+
+struct HookEntry {
+  uint32_t id;
+  const char* name;
+  ReplayHookFn fn;
+  HookKind kind;
+};
+
+// Registers a hook, returning its stored entry (callable from a static initializer).
+// Idempotent: a duplicate name returns the existing entry.
+const HookEntry* RegisterHook(const char* name, ReplayHookFn fn, HookKind kind);
+
+// Looks a hook up by its FNV-1a id (EventRecord.hook_id), or nullptr when this build
+// does not hook that call (e.g. a call compiled out by wwe13_d3d_names.h switches).
+const HookEntry* FindHook(uint32_t id);
+
+// Iterates every registered hook (diagnostics / the replay's summary).
+void ForEachHook(const std::function<void(const HookEntry&)>& visitor);
 }  // namespace svr::recorder

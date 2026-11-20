@@ -900,8 +900,12 @@ std::unordered_map<u64, GuestVertexDeclaration *> g_decls_by_hash;
 void SvrOnShaderCreated(u32 shader_va, u32 function_va, bool pixel) {
   if (!shader_va || !function_va)
     return;
-  const auto *container = bd::mem::at<const ShaderContainer>(function_va);
-  if (!container)
+  SvrRegisterShaderContainer(shader_va, bd::mem::at<const ShaderContainer>(function_va), pixel);
+}
+
+void SvrRegisterShaderContainer(u32 shader_va, const void *container_bytes, bool pixel) {
+  const auto *container = static_cast<const ShaderContainer *>(container_bytes);
+  if (!shader_va || !container)
     return;
   // Keyed like CreateShader's cache lookup (the whole container), plus the stage.
   const u32 length = u32(container->virtualSize) + u32(container->physicalSize);
@@ -1058,8 +1062,11 @@ GuestShader *SvrLookupShader(u32 shader_va) {
 void SvrOnVertexDeclarationCreated(u32 decl_va, u32 elements_va) {
   if (!decl_va || !elements_va)
     return;
-  auto *elements = bd::mem::at<GuestVertexElement>(elements_va);
-  if (!elements)
+  SvrRegisterVertexDeclaration(decl_va, bd::mem::at<GuestVertexElement>(elements_va));
+}
+
+void SvrRegisterVertexDeclaration(u32 decl_va, const GuestVertexElement *elements) {
+  if (!decl_va || !elements)
     return;
   // Elements up to the D3DDECL_END terminator (stream 0xFF), padding zeroed for a stable key.
   std::vector<GuestVertexElement> normalized;
