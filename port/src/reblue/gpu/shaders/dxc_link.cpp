@@ -9,7 +9,9 @@
  */
 #include "gpu/shaders/dxc_link.h"
 
+#ifdef _WIN32
 #include <unknwn.h>
+#endif  // (Linux host prelink: dxcapi.h brings WinAdapter.h)
 
 #include <dxcapi.h>
 

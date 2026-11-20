@@ -46,6 +46,12 @@ set(WWE13_XSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../work/shaders/xsc" CACHE PATH
     "The game's shader containers (.xsc) dumped with WWE13_DUMP_SHADERS")
 file(GLOB WWE13_XSC_FILES CONFIGURE_DEPENDS "${WWE13_XSC_DIR}/*.xsc")
 set(WWE13_XR_EXE "${WWE13_XR_DIR}/build/XenosRecomp/XenosRecomp.exe")
+set(WWE13_XR_RUN "${WWE13_XR_EXE}")
+if(NOT CMAKE_HOST_WIN32)
+    # Linux cross-build: XenosRecomp built for Linux in <reblue-XenosRecomp>/build-linux (-DREBLUE_RECOMP).
+    set(WWE13_XR_EXE "${WWE13_XR_DIR}/build-linux/XenosRecomp/XenosRecomp")
+    set(WWE13_XR_RUN "${WWE13_NATIVE_ROOT}/tools/xenosrecomp-linux.sh" "${WWE13_XR_DIR}")
+endif()
 set(_d3d_default OFF)
 if(WIN32 AND WWE13_XSC_FILES AND EXISTS "${WWE13_XR_EXE}")
     set(_d3d_default ON)
@@ -129,7 +135,27 @@ set(WWE13_HLSL_DIR "${WWE13_NATIVE_ROOT}/src/reblue/gpu/shaders/hlsl")
 set(WWE13_HOST_SHADER_HEADERS "")
 set(WWE13_HOST_SHADER_HEADERS_DXIL "")
 set(WWE13_HOST_SHADER_HEADERS_DXBC "")
-if(WIN32 AND WWE13_D3D11_EXE)
+set(WWE13_FXC_LITE_DIR "" CACHE PATH
+    "Linux cross-build: folder for fxc-lite.exe, holding Microsoft's D3DCompiler_47.dll (tools/fxc-lite)")
+if(WIN32 AND WWE13_D3D11_EXE AND NOT CMAKE_HOST_WIN32)
+    # Linux cross-build: fxc-lite (the fxc options these scripts use, on Microsoft's D3DCompiler_47.dll) under Wine.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(NOT WWE13_FXC_LITE_DIR OR NOT EXISTS "${WWE13_FXC_LITE_DIR}/D3DCompiler_47.dll" OR NOT Python3_FOUND)
+        message(WARNING "wwe13_d3d11 cross-build needs WWE13_FXC_LITE_DIR with D3DCompiler_47.dll, and Python 3: not built")
+        set(WWE13_D3D11_EXE OFF CACHE BOOL "" FORCE)
+    else()
+        # fxc-lite is a Windows program built by this toolchain; a generated wrapper runs it under Wine
+        # next to the genuine DLL.
+        add_executable(wwe13_fxc_lite "${WWE13_NATIVE_ROOT}/tools/fxc-lite/fxc-lite.cpp")
+        target_compile_definitions(wwe13_fxc_lite PRIVATE _CRT_SECURE_NO_WARNINGS)
+        set(WWE13_FXC "${CMAKE_BINARY_DIR}/fxc.sh")
+        file(WRITE "${WWE13_FXC}" "#!/bin/sh\n"
+            "cp -u \"${CMAKE_BINARY_DIR}/wwe13_fxc_lite.exe\" \"${WWE13_FXC_LITE_DIR}/fxc-lite.exe\" || exit 1\n"
+            "exec \"${WWE13_NATIVE_ROOT}/tools/fxc-lite/fxc.sh\" \"${WWE13_FXC_LITE_DIR}\" \"$@\"\n")
+        file(CHMOD "${WWE13_FXC}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE)
+        set(WWE13_FXC_DEPENDS wwe13_fxc_lite)
+    endif()
+elseif(WIN32 AND WWE13_D3D11_EXE)
     file(GLOB WWE13_FXC_CANDIDATES "C:/Program Files (x86)/Windows Kits/10/bin/10.*/x64/fxc.exe")
     list(SORT WWE13_FXC_CANDIDATES)
     list(POP_BACK WWE13_FXC_CANDIDATES WWE13_FXC)
@@ -176,7 +202,7 @@ function(wwe13_host_shader STEM PROFILE)
                     "${WWE13_FXC}" ${profile_sm5} "${WWE13_HLSL_DIR}/${STEM}.hlsl" "${out_dxbc}"
                     g_${STEM}_dxbc -I "${WWE13_NATIVE_ROOT}"
             DEPENDS "${WWE13_HLSL_DIR}/${STEM}.hlsl" ${hlsl_includes}
-                    "${WWE13_NATIVE_ROOT}/tools/host_shader_d3d11.py"
+                    "${WWE13_NATIVE_ROOT}/tools/host_shader_d3d11.py" ${WWE13_FXC_DEPENDS}
             COMMENT "Compiling ${STEM}.hlsl (${profile_sm5}, DXBC)"
             VERBATIM)
         set(WWE13_HOST_SHADER_HEADERS_DXBC ${WWE13_HOST_SHADER_HEADERS_DXBC} "${out_dxbc}" PARENT_SCOPE)
@@ -203,7 +229,7 @@ if(WWE13_D3D12_EXE OR WWE13_D3D11_EXE OR WWE13_VULKAN_BUILTIN_SHADERS)
         OUTPUT "${WWE13_SHADER_CACHE}" "${WWE13_D3D11_HLSL}/.done"
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${WWE13_D3D11_HLSL}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${WWE13_D3D11_HLSL}"
-        COMMAND "${WWE13_XR_EXE}" "${WWE13_XSC_DIR}" "${WWE13_SHADER_CACHE}"
+        COMMAND ${WWE13_XR_RUN} "${WWE13_XSC_DIR}" "${WWE13_SHADER_CACHE}"
                 "${WWE13_XR_DIR}/XenosRecomp/shader_common.h" "${WWE13_D3D11_HLSL}"
         COMMAND ${CMAKE_COMMAND} -E touch "${WWE13_D3D11_HLSL}/.done"
         DEPENDS ${WWE13_XSC_FILES} "${WWE13_XR_EXE}" "${WWE13_XR_DIR}/XenosRecomp/shader_common.h"
@@ -236,12 +262,26 @@ if(WWE13_D3D12_EXE)
             $<TARGET_FILE_DIR:wwe13_prelink>
         VERBATIM)
     set(WWE13_LINKED_SHADER_CACHE "${WWE13_NATIVE_GEN}/linked_shader_cache.cpp")
-    add_custom_command(
-        OUTPUT "${WWE13_LINKED_SHADER_CACHE}"
-        COMMAND wwe13_prelink "${WWE13_LINKED_SHADER_CACHE}"
-        DEPENDS wwe13_prelink "${WWE13_SHADER_CACHE}"
-        COMMENT "Pre-linking the D3D12 spec-constant shader variants"
-        VERBATIM)
+    if(CMAKE_HOST_WIN32)
+        add_custom_command(
+            OUTPUT "${WWE13_LINKED_SHADER_CACHE}"
+            COMMAND wwe13_prelink "${WWE13_LINKED_SHADER_CACHE}"
+            DEPENDS wwe13_prelink "${WWE13_SHADER_CACHE}"
+            COMMENT "Pre-linking the D3D12 spec-constant shader variants"
+            VERBATIM)
+    else()
+        # Linux cross-build: the same prelink sources built for the host against dxc-bin's libdxcompiler.so
+        # (dxcompiler.dll under Wine failed every link).
+        add_custom_command(
+            OUTPUT "${WWE13_LINKED_SHADER_CACHE}"
+            COMMAND "${WWE13_NATIVE_ROOT}/tools/prelink-linux.sh" "${WWE13_NATIVE_ROOT}" "${WWE13_XENOS_DIR}"
+                    "${WWE13_MINIZ_DIR}" "${CMAKE_BINARY_DIR}/prelink-host" "${WWE13_SHADER_CACHE}"
+                    "${WWE13_LINKED_SHADER_CACHE}"
+            DEPENDS "${WWE13_SHADER_CACHE}" "${WWE13_NATIVE_ROOT}/src/prelink/wwe13_prelink.cpp"
+                    "${WWE13_NATIVE_ROOT}/tools/prelink-linux.sh"
+            COMMENT "Pre-linking the D3D12 spec-constant shader variants (Linux host)"
+            VERBATIM)
+    endif()
 endif()
 
 # D3D11: the game's shaders as DXBC (fxc), one per spec-constant subset (WWE '12 PC's method).
@@ -249,9 +289,10 @@ if(WWE13_D3D11_EXE)
     set(WWE13_DXBC_SHADER_CACHE "${WWE13_NATIVE_GEN}/dxbc_shader_cache.cpp")
     add_custom_command(
         OUTPUT "${WWE13_DXBC_SHADER_CACHE}"
-        COMMAND "${Python3_EXECUTABLE}" -I "${WWE13_NATIVE_ROOT}/tools/convert_shaders_d3d11.py"
+        COMMAND ${CMAKE_COMMAND} -E env "WWE13_FXC=${WWE13_FXC}"
+                "${Python3_EXECUTABLE}" -I "${WWE13_NATIVE_ROOT}/tools/convert_shaders_d3d11.py"
                 "${WWE13_D3D11_HLSL}" "${WWE13_DXBC_SHADER_CACHE}"
-        DEPENDS "${WWE13_D3D11_HLSL}/.done" "${WWE13_NATIVE_ROOT}/tools/convert_shaders_d3d11.py"
+        DEPENDS "${WWE13_D3D11_HLSL}/.done" "${WWE13_NATIVE_ROOT}/tools/convert_shaders_d3d11.py" ${WWE13_FXC_DEPENDS}
         COMMENT "Converting the game's shaders to DXBC (fxc)"
         VERBATIM)
 endif()

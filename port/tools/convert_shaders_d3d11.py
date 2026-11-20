@@ -31,7 +31,7 @@ import sys
 import tempfile
 import zlib
 
-FXC = (sorted(glob.glob(r"C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\fxc.exe")) or [""])[-1]
+FXC = os.environ.get("WWE13_FXC") or (sorted(glob.glob(r"C:\Program Files (x86)\Windows Kits\10\bin\10.*\x64\fxc.exe")) or [""])[-1]  # WWE13_FXC: Linux cross-build (fxc-lite)
 
 HEADER_RE = re.compile(r"^// (pixel|vertex) shader\s+hash=0x([0-9A-Fa-f]{16})\s+specConstants=0x([0-9A-Fa-f]+)")
 INDEX_RE = re.compile(r"^\s*uint (\w+)_(Texture2D|Texture3D|TextureCube|Sampler)DescriptorIndex : "
