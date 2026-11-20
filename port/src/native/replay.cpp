@@ -42,6 +42,10 @@ REXCVAR_DEFINE_STRING(wwe13_replay_png, "", "WWE13",
 REXCVAR_DEFINE_INT32(wwe13_replay_loops, 1, "WWE13",
                      "Replay: run the recording this many times")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_STRING(wwe13_replay_skip, "", "WWE13",
+                      "Replay experiment: file of D3DDevice_Resolve ordinals (0-based, one per line, "
+                      "per pass) whose calls are skipped; tests an offline copy-liveness list")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 namespace svr::replay {
 
@@ -60,6 +64,9 @@ struct ReplayState {
   std::unordered_set<uint32_t> committed;  // guest heap pages already allocated
   uint32_t alloc_failures = 0;
   uint32_t target_failures = 0;
+  std::unordered_set<uint32_t> skip_resolves;  // wwe13_replay_skip
+  uint32_t resolve_ordinal = 0;                // per pass
+  uint32_t skipped = 0;
 };
 
 // Reads <dir>/recording.w13r into one flat byte stream: each chunk is uncompressed (miniz
@@ -247,6 +254,11 @@ void ApplyCall(ReplayState& s, const uint8_t* body, uint32_t bytes) {
 
   if (std::strcmp(hook->name, "D3DDevice_Swap") == 0)
     s.front_buffer_va = ctx.r4.u32;  // Swap's second argument is the front buffer
+  if (!s.skip_resolves.empty() && std::strcmp(hook->name, "D3DDevice_Resolve") == 0 &&
+      s.skip_resolves.count(s.resolve_ordinal++)) {
+    ++s.skipped;
+    return;
+  }
 
   hook->fn(ctx, uint32_t(ev.return_value), s.memory->virtual_membase());
   ++s.calls;
@@ -436,6 +448,14 @@ bool Run(rex::ui::Window* window) {
   // accessors (texture headers live at 0xA0000000+) read it.
   bd::mem::set_replay_physical_views(true);
   ParsePngList(REXCVAR_GET(wwe13_replay_png), s.png_frames);
+  if (const std::string skip = REXCVAR_GET(wwe13_replay_skip); !skip.empty()) {
+    if (std::FILE* f = std::fopen(skip.c_str(), "r")) {
+      unsigned v = 0;
+      while (std::fscanf(f, "%u", &v) == 1) s.skip_resolves.insert(v);
+      std::fclose(f);
+    }
+    REXLOG_INFO("[replay] skipping {} resolves listed in {}", s.skip_resolves.size(), skip);
+  }
 
   uint32_t hook_count = 0;
   svr::recorder::ForEachHook([&](const svr::recorder::HookEntry& e) {
@@ -451,14 +471,16 @@ bool Run(rex::ui::Window* window) {
   for (int i = 0; i < loops; ++i) {
     s.frames = 0;
     s.calls = 0;
+    s.resolve_ordinal = 0;
     RunPass(s, stream);
     total_frames += s.frames;
     total_calls += s.calls;
   }
   const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   const double ms = total_frames ? secs * 1000.0 / double(total_frames) : 0.0;
-  REXLOG_INFO("[replay] {} frames, avg {:.1f} ms/frame ({} calls, {} loop{})", total_frames, ms,
-              total_calls, loops, loops == 1 ? "" : "s");
+  REXLOG_INFO("[replay] {} frames, avg {:.1f} ms/frame ({} calls, {} loop{}, {} resolves skipped, "
+              "{} per pass)", total_frames, ms, total_calls, loops, loops == 1 ? "" : "s", s.skipped,
+              s.resolve_ordinal);
 
   window->RequestClose();
   return true;
