@@ -44,6 +44,10 @@
 // scene towards the bokeh one by a factor built from g_f4DOFParam (c20) and g_f4DOFParam2 (c21).
 // With both zero the factor is 0 in every one of them (checked in the recompiled HLSL): the picture
 // stays sharp and everything else the shader does is kept.
+// Test only (2026-11-20, GPU-bound check): never a setting. Changes the picture.
+REXCVAR_DEFINE_BOOL(wwe13_diag_gpu_cut, false, "WWE13",
+                    "Diagnostic: draws cover only the top-left quarter of their scissor (GPU pixel "
+                    "work cut, CPU work unchanged) to tell GPU-bound from CPU-bound; breaks the picture");
 REXCVAR_DEFINE_BOOL(wwe12_dof, true, "WWE12",
                     "Depth of field (the background blur in entrances and replays). Off = always sharp.");
 
@@ -279,7 +283,11 @@ void SvrApplyScissor(VideoState &s, u32 device_guest) {
   const i32 top = i32((tl >> 16) & 0x7FFFu);
   const i32 right = std::max(left, i32(br & 0x7FFFu));
   const i32 bottom = std::max(top, i32((br >> 16) & 0x7FFFu));
-  const plume::RenderRect rc{sc(left), sc(top), sc(right), sc(bottom)};
+  plume::RenderRect rc{sc(left), sc(top), sc(right), sc(bottom)};
+  if (REXCVAR_GET(wwe13_diag_gpu_cut)) {
+    rc.right = rc.left + std::max(1, (rc.right - rc.left) / 2);
+    rc.bottom = rc.top + std::max(1, (rc.bottom - rc.top) / 2);
+  }
   s.command_list->setScissors(&rc, 1);
 }
 #else

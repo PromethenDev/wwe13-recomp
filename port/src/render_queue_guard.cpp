@@ -58,6 +58,16 @@ REXCVAR_DEFINE_BOOL(wwe13_renderq_serial_auto, false, "WWE13",
                     "(entrances, loading), keep the game's overlap at 60 fps")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
+// Scene-keyed variant (2026-11-20): the game keeps its own frame rate in a global the render loop
+// sub_82AA5530 reads every frame (struct at 0x835B2DE8: +8 = rate 25/30/50/60, +40 = ms per frame;
+// written by sub_82AA6410 (set), sub_82AA65B0 (60 -> 30, entrances) and sub_82AA6650 (30 -> 60)).
+// With wwe13_renderq_serial_scene the ordering is kept whenever that rate is not 60 and for the
+// first 120 render loops after it returns to 60; a steady 60 fps scene (match, menus) gets the
+// game's overlap back. Not init-only so the live in-run A/B can switch it. Off by default.
+REXCVAR_DEFINE_BOOL(wwe13_renderq_serial_scene, false, "WWE13",
+                    "With wwe13_renderq_serial: order the job threads only while the game's own frame "
+                    "rate is not 60 (entrances, cut scenes), keep the game's overlap in 60 fps scenes");
+
 REX_EXTERN(__imp__sub_82AA4C70);  // runs one command (obj, &command pointer)
 REX_EXTERN(__imp__sub_82AA5458);  // the game's replay
 REX_EXTERN(__imp__sub_82B24658);  // starts the render job threads (only caller: the render loop)
@@ -112,8 +122,48 @@ bool SerialNow() {
 }
 }  // namespace
 
+namespace {
+constexpr uint32_t kGameFrameRate = 0x835B2DE8 + 8;
+constexpr uint32_t kSceneHoldLoops = 120;
+
+// Render thread only. True while the game's frame rate asks for the ordering. Logs each change of
+// the rate (first 200) so a run shows which scenes are 30 and which are 60.
+bool SceneSerial(const uint8_t* base) {
+  static uint32_t last_rate = 0xFFFFFFFFu, steady = 0, logged = 0;
+  uint32_t rate;
+  std::memcpy(&rate, base + kGameFrameRate, 4);
+  rate = __builtin_bswap32(rate);
+  if (rate != last_rate) {
+    if (logged++ < 200)
+      REXLOG_INFO("[wwe13-renderq] game frame rate {} -> {}", int32_t(last_rate), rate);
+    last_rate = rate;
+  }
+  if (rate != 60) {
+    steady = 0;
+    return true;
+  }
+  if (steady < kSceneHoldLoops) {
+    ++steady;
+    return true;
+  }
+  return false;
+}
+}  // namespace
+
 extern "C" REX_FUNC(sub_82B24658) {
-  if (REXCVAR_GET(wwe13_renderq_serial) && SerialNow()) {
+  const bool scene_serial = SceneSerial(base);
+  const bool serial_now = REXCVAR_GET(wwe13_renderq_serial_scene) ? scene_serial : SerialNow();
+  if (REXCVAR_GET(wwe13_renderq_serial)) {
+    // Each change of mode (first 100): which scenes ran with the game's overlap.
+    static bool last_serial = true;
+    static uint32_t changes = 0;
+    if (serial_now != last_serial && changes < 100) {
+      ++changes;
+      REXLOG_INFO("[wwe13-renderq] job threads now {} the replay", serial_now ? "start after" : "overlap");
+    }
+    last_serial = serial_now;
+  }
+  if (REXCVAR_GET(wwe13_renderq_serial) && serial_now) {
     static std::atomic<bool> announced{false};
     if (!announced.exchange(true, std::memory_order_relaxed))
       REXLOG_INFO("[wwe13-renderq] job threads start after the replay (wwe13_renderq_serial)");

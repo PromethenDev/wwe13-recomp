@@ -509,15 +509,34 @@ bool Run(rex::ui::Window* window) {
     s.frames = 0;
     s.calls = 0;
     s.resolve_ordinal = 0;
-    if (!ab.empty() && !rex::cvar::SetFlagByName(ab, (i & 1) ? "true" : "false"))
-      REXLOG_ERROR("[replay] A/B: cannot set {}", ab);
+    // A comma list switches several bool options together (a bundle).
+    for (size_t b = 0; !ab.empty() && b <= ab.size();) {
+      const size_t e = std::min(ab.find(',', b), ab.size());
+      if (e > b && !rex::cvar::SetFlagByName(ab.substr(b, e - b), (i & 1) ? "true" : "false"))
+        REXLOG_ERROR("[replay] A/B: cannot set {}", ab.substr(b, e - b));
+      b = e + 1;
+    }
+    // Renderer CPU of this loop: every hook but Swap (which holds the vsync wait), and the draws.
+    const auto cpu_now = [&s](double& draws) {
+      double all = 0;
+      draws = 0;
+      for (const auto& [name, v] : s.hook_ms) {
+        if (name != "D3DDevice_Swap") all += v.first;
+        if (name.find("Vertices") != std::string::npos) draws += v.first;
+      }
+      return all;
+    };
+    double draws0 = 0, draws1 = 0;
+    const double cpu0 = cpu_now(draws0);
     const auto l0 = std::chrono::steady_clock::now();
     RunPass(s, stream);
     if (!ab.empty()) {
       const double lms = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - l0).count() / std::max(1u, s.frames);
       const std::string label = "loop " + std::to_string(i) + " " + ab + "=" + ((i & 1) ? "on" : "off") + ": ";
-      REXLOG_INFO("[replay] {}{:.1f} ms/frame", label, lms);
+      const double cpu1 = cpu_now(draws1);
+      REXLOG_INFO("[replay] {}{:.1f} ms/frame | renderer CPU without Swap {:.3f} ms/frame, draws {:.3f}", label,
+                  lms, (cpu1 - cpu0) / std::max(1u, s.frames), (draws1 - draws0) / std::max(1u, s.frames));
       bd::gpu::census::Flush(label.c_str());
     }
     if (i == 0 && loops > 1) {

@@ -11,6 +11,10 @@
 
 #pragma once
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+
 #include <rex/hook.h>
 #include <rex/ppc/context.h>
 #include <rex/ppc/function.h>
@@ -48,6 +52,22 @@ inline void CopyArgs(PPCContext &dst, const PPCContext &src) {
   dst.f8 = src.f8;
 }
 
+// Live hook CPU profile (wwe13_hook_profile, default off): time in the game's own D3D function
+// (the guest side: device shadows + GPU packets for the emulated GPU) and in the renderer's side,
+// per hook, logged every 600 frames as [hook-cpu]. Costs three clock reads per hooked call.
+struct HookProf {
+  const char *name;
+  std::atomic<uint64_t> guest_ns{0}, host_ns{0}, calls{0};
+  HookProf *next = nullptr;
+};
+HookProf *RegisterHookProf(const char *name);
+extern bool g_hook_profile;
+inline uint64_t HookNow() {
+  return uint64_t(std::chrono::steady_clock::now().time_since_epoch().count());
+}
+// Call once per frame (render thread): refreshes g_hook_profile and logs the totals.
+void HookProfileTick(uint64_t frame);
+
 }  // namespace svr
 
 namespace svr::recorder {
@@ -67,11 +87,19 @@ void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
   extern "C" REX_FUNC(subroutine) {                              \
     PPCContext svr_args;                                         \
     ::svr::CopyArgs(svr_args, ctx);                              \
+    static ::svr::HookProf *const svr_prof = ::svr::RegisterHookProf(#subroutine); \
+    const uint64_t svr_t0 = ::svr::g_hook_profile ? ::svr::HookNow() : 0; \
     __imp__##subroutine(ctx, base);                              \
+    const uint64_t svr_t1 = svr_t0 ? ::svr::HookNow() : 0;       \
     ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, false); \
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
     if (svr_on)                                                  \
       rex::ppc::HostToGuestFunction<function>(svr_args, base);   \
+    if (svr_t0) {                                                \
+      svr_prof->guest_ns.fetch_add(svr_t1 - svr_t0, std::memory_order_relaxed); \
+      svr_prof->host_ns.fetch_add(::svr::HookNow() - svr_t1, std::memory_order_relaxed); \
+      svr_prof->calls.fetch_add(1, std::memory_order_relaxed);   \
+    }                                                            \
   }                                                              \
   static const bool _svr_reg_##subroutine =                       \
       ::svr::recorder::RegisterHook(#subroutine,                 \
@@ -84,11 +112,19 @@ void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
   extern "C" REX_FUNC(subroutine) {                              \
     PPCContext svr_args;                                         \
     ::svr::CopyArgs(svr_args, ctx);                              \
+    static ::svr::HookProf *const svr_prof = ::svr::RegisterHookProf(#subroutine); \
+    const uint64_t svr_t0 = ::svr::g_hook_profile ? ::svr::HookNow() : 0; \
     ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, false); \
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
     if (svr_on)                                                  \
       rex::ppc::HostToGuestFunction<function>(svr_args, base);   \
+    const uint64_t svr_t1 = svr_t0 ? ::svr::HookNow() : 0;       \
     __imp__##subroutine(ctx, base);                              \
+    if (svr_t0) {                                                \
+      svr_prof->host_ns.fetch_add(svr_t1 - svr_t0, std::memory_order_relaxed); \
+      svr_prof->guest_ns.fetch_add(::svr::HookNow() - svr_t1, std::memory_order_relaxed); \
+      svr_prof->calls.fetch_add(1, std::memory_order_relaxed);   \
+    }                                                            \
   }                                                              \
   static const bool _svr_reg_##subroutine =                       \
       ::svr::recorder::RegisterHook(#subroutine,                 \
@@ -101,11 +137,19 @@ void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
   extern "C" REX_FUNC(subroutine) {                              \
     PPCContext svr_args;                                         \
     ::svr::CopyArgs(svr_args, ctx);                              \
+    static ::svr::HookProf *const svr_prof = ::svr::RegisterHookProf(#subroutine); \
+    const uint64_t svr_t0 = ::svr::g_hook_profile ? ::svr::HookNow() : 0; \
     __imp__##subroutine(ctx, base);                              \
+    const uint64_t svr_t1 = svr_t0 ? ::svr::HookNow() : 0;       \
     ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, true); \
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
     if (svr_on)                                                  \
       function(svr_args, ctx.r3.u32, base);                      \
+    if (svr_t0) {                                                \
+      svr_prof->guest_ns.fetch_add(svr_t1 - svr_t0, std::memory_order_relaxed); \
+      svr_prof->host_ns.fetch_add(::svr::HookNow() - svr_t1, std::memory_order_relaxed); \
+      svr_prof->calls.fetch_add(1, std::memory_order_relaxed);   \
+    }                                                            \
   }                                                              \
   static const bool _svr_reg_##subroutine =                       \
       ::svr::recorder::RegisterHook(#subroutine,                 \

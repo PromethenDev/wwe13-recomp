@@ -36,6 +36,10 @@
 #include "gpu/vertex_declaration.h"
 #include "wwe12_display.h"  // FPS counter, frame limit (global function)
 
+namespace svr {
+void HookProfileTick(uint64_t frame);  // wwe13_native_stubs.cpp (live hook CPU profile)
+}
+
 // src/native/crash_trace.cpp: hang watchdog, fed once per presented frame.
 void SvrWatchdogHeartbeat();
 // src/native/display_size.cpp.
@@ -1364,15 +1368,16 @@ void LiveAbTick() {
   std::vector<float> sorted = ms;
   std::sort(sorted.begin(), sorted.end());
   double sum = 0;
-  u32 slow = 0;
+  u32 slow = 0, on_time = 0;
   for (float v : ms) {
     sum += v;
     slow += v > 33.4f;
+    on_time += v <= 17.5f;  // one 60 Hz refresh (16.7 ms) plus timer slack
   }
   const size_t n = sorted.size();
-  BD_INFO("[ab] seg {} {}={} {:.1f} s: {} frames, {:.2f} fps, median {:.2f} ms, p99 {:.2f} ms, >33ms {}",
+  BD_INFO("[ab] seg {} {}={} {:.1f} s: {} frames, {:.2f} fps, median {:.2f} ms, p99 {:.2f} ms, >33ms {}, <=17ms {:.1f} %",
           segment, flag, on ? "on" : "off", secs, n, n / secs, sorted[n / 2],
-          sorted[std::min(n - 1, n * 99 / 100)], slow);
+          sorted[std::min(n - 1, n * 99 / 100)], slow, n ? 100.0 * on_time / n : 0.0);
   ++segment;
   on = !on;
   set_all(on);
@@ -1385,6 +1390,7 @@ void SvrOnFrame() {
   SvrWatchdogHeartbeat();
   LiveAbTick();
   const u64 frame = g_frame.fetch_add(1, std::memory_order_relaxed);
+  ::svr::HookProfileTick(frame);
   g_frame_index.store(frame, std::memory_order_relaxed);
   SvrProcessDeferredReadbacks(frame);
   g_surface_frame.store(frame, std::memory_order_relaxed);
