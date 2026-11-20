@@ -22,6 +22,7 @@ enum Kind : u8 {
   kClear,         // Clear() and framebuffer bind clears
   kUpload,        // texture uploads (guest memory -> host texture)
   kPresent,       // the final present pass
+  kResolveBarrier,  // the layout transitions before a resolve draw (render target -> shader read)
   kOther,         // anything after a list starts before the first mark
   kKindCount
 };

@@ -362,6 +362,15 @@ void PutMem(State& s, uint32_t space, uint32_t address, uint32_t length) {
   s.mem_bytes += length;
 }
 
+// A small argument block a call reads through a pointer (kMem): physical views as physical offsets.
+void PutArg(State& s, uint32_t va, uint32_t length) {
+  if (!va || !bd::mem::try_at<const uint8_t>(va)) return;
+  if (va >= 0xA0000000u)
+    PutMem(s, 1, bd::gpu::SvrGpuAddress(va) & 0x1FFFFFFFu, length);
+  else
+    PutMem(s, 0, va, length);
+}
+
 // Mid-frame writes a recorded call reads (see kMem in recorder.h).
 void NoteMidFrameWrites(State& s, const char* name, const PPCContext& args, uint32_t return_value) {
   if (std::strcmp(name, "D3DDevice_BeginVertices") == 0) {
@@ -375,6 +384,15 @@ void NoteMidFrameWrites(State& s, const char* name, const PPCContext& args, uint
         PutMem(s, 0, s.bv_va, s.bv_size);
     }
     s.bv_va = s.bv_size = 0;
+  } else if (std::strcmp(name, "D3DDevice_Resolve") == 0) {
+    // Arguments the game builds on its stack just before the call: source rect, dest point, clear colour.
+    PutArg(s, args.r5.u32, 16);
+    PutArg(s, args.r7.u32, 8);
+    PutArg(s, args.r10.u32, 16);
+  } else if (std::strcmp(name, "D3DDevice_Clear") == 0) {
+    if (args.r4.u32 && args.r4.u32 <= 64) PutArg(s, args.r5.u32, args.r4.u32 * 16u);
+  } else if (std::strcmp(name, "D3DDevice_SetScissorRect") == 0) {
+    PutArg(s, args.r4.u32, 16);
   } else if (std::strcmp(name, "D3DVertexBuffer_Unlock") == 0) {
     if (const auto* vb = bd::mem::try_at<const bd::gpu::D3DVertexBuffer>(args.r3.u32)) {
       const uint32_t address = uint32_t(vb->FetchLo) & ~3u, size = uint32_t(vb->FetchHi) & 0x03FFFFFCu;

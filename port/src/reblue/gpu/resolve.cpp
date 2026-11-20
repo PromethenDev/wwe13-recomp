@@ -259,6 +259,7 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
                                     plume::RenderTextureLayout::SHADER_READ),
         plume::RenderTextureBarrier(dst->texture, dst_write_layout),
     };
+    census::Mark(s, census::kResolveBarrier);
     s.command_list->barriers(plume::RenderBarrierStage::GRAPHICS, pre,
                              std::size(pre));
     src->layout = plume::RenderTextureLayout::SHADER_READ;

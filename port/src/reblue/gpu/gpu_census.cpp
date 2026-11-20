@@ -38,7 +38,7 @@ constexpr u16 kResolveBase = kBucketBase + kMaxBuckets + 1;
 constexpr u32 kKeys = kResolveBase + kMaxResolveSigs + 1;
 
 const char *const kKindNames[kKindCount] = {"draw", "resolve-copy", "resolve-draw", "clear",
-                                            "upload", "present", "other"};
+                                            "upload", "present", "resolve-barrier", "other"};
 
 struct Slot {
   std::unique_ptr<plume::RenderQueryPool> pool;

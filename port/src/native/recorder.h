@@ -39,7 +39,8 @@ struct ChunkHeader {
 // registers them first and skips the recorded Create calls.
 // kMem {u32 space (0 virtual, 1 physical), u32 address/offset, u32 length, bytes}: memory the game wrote mid-frame
 // that a draw reads before the next frame-start scan (BeginVertices data at EndVertices, a vertex/index buffer at
-// its Unlock); written just before the call record that consumes it.
+// its Unlock, the rect/point/colour blocks Resolve, Clear and SetScissorRect read through pointers); written just
+// before the call record that consumes it.
 enum RecordType : uint32_t { kBasePage = 1, kFramePage = 2, kDevice = 3, kCall = 4, kFrameEnd = 5, kShader = 6, kDecl = 7, kMem = 8, kTarget = 9 };
 // kTarget {u32 texture VA, u32 scale in quarters (4 = 1x), u32 face, u32 level, u32 width, u32 height, u32 row pitch,
 // texels}: a GPU-written texture's content at the start (after the base snapshot), e.g. reflection cubes the game
