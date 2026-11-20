@@ -11,4 +11,6 @@ clang-20 -O2 -w -c -I"$MZ" "$MZ/miniz.c" -o "$W/miniz.o"
 clang++-20 -std=c++20 -O2 -w -fms-extensions -I"$P/src/reblue" -I"$P/third_party/reblue_thirdparty/zstd" -I"$MZ" -I"$D/inc" \
   "$P/src/prelink/wwe13_prelink.cpp" "$P/src/reblue/gpu/shaders/dxc_link.cpp" "$CACHE" "$W/zstd.o" "$W/miniz.o" \
   -L"$D/lib/x64" -ldxcompiler -Wl,-rpath,"$D/lib/x64" -lpthread -o "$W/wwe13_prelink-linux"
-exec "$W/wwe13_prelink-linux" "$OUT"
+# libdxcompiler.so dlopens libdxil.so (the validator that signs the DXIL); the RUNPATH above does not cover
+# that dlopen, so without this every linked shader came out unsigned and D3D12 rejected all pipelines.
+LD_LIBRARY_PATH="$D/lib/x64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" exec "$W/wwe13_prelink-linux" "$OUT"

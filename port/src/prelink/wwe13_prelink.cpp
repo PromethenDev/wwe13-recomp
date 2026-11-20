@@ -116,6 +116,20 @@ int main(int argc, char **argv) {
     return a.hash != b.hash ? a.hash < b.hash : a.value < b.value;
   });
 
+  // D3D12 refuses unsigned DXIL (zero container hash: DXC ran without dxil.dll / libdxil.so) and every
+  // pipeline using it fails at run time, so an unsigned variant fails the build here instead.
+  size_t unsigned_count = 0;
+  for (const Variant &v : variants) {
+    static const uint8_t zero[16] = {};
+    if (v.dxil.size() < 20 || std::memcmp(v.dxil.data() + 4, zero, 16) == 0)
+      ++unsigned_count;
+  }
+  if (unsigned_count) {
+    std::fprintf(stderr, "wwe13_prelink: %zu of %zu linked shaders are unsigned (validator dxil not loaded)\n",
+                 unsigned_count, variants.size());
+    return 1;
+  }
+
   std::vector<uint8_t> blob;
   std::vector<uint32_t> offsets;
   for (const Variant &v : variants) {
