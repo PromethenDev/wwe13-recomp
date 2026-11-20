@@ -948,8 +948,14 @@ CreateHostGraphicsPipeline(plume::RenderDevice *device,
              VK_NULL_HANDLE
 #endif
   ) {
-    BD_ERROR("CreateHostGraphicsPipeline({}) failed: backend pipeline null",
-             tag ? tag : "?");
+    // A pipeline the driver cannot build is retried on every draw that needs it: log the first
+    // ones and then a count, so a broken driver or shader set cannot flood the log (the 4 MB log
+    // then kept only the last seconds and lost the start-up lines that name the GPU).
+    static std::atomic<u32> s_failed{0};
+    const u32 n = s_failed.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 20 || (n & (n - 1)) == 0)
+      BD_ERROR("CreateHostGraphicsPipeline({}) failed: backend pipeline null ({} failed so far)",
+               tag ? tag : "?", n);
     CheckDeviceRemoved(tag ? tag : "pipeline");
     return nullptr;
   }
