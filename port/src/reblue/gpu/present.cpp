@@ -9,6 +9,7 @@
  * @license   BSD 3-Clause License
  *            See LICENSE file in the project root for full license text.
  */
+#include "gpu/gpu_census.h"
 #include "gpu/frame.h"
 #include "gpu/cpu_zones.h"
 
@@ -209,6 +210,7 @@ void RecordPresentPass(VideoState &s, GuestTexture *rt,
                        plume::RenderTexture *back,
                        plume::RenderFramebuffer *back_fb) {
   BD_GPU_ZONE("RecordPresentPass");
+  census::Mark(s, census::kPresent);
   if (rt->layout != plume::RenderTextureLayout::SHADER_READ) {
     const bool needs_discard =
         (rt->layout == plume::RenderTextureLayout::UNKNOWN);
@@ -348,6 +350,7 @@ void Video::Clear(u32 flags, u32 color_argb, float depth, u32 stencil,
       return;
   }
   const plume::RenderRect *clear_rects = clamped_count ? clamped : nullptr;
+  census::Mark(s, census::kClear);
   if (clear_color)
     s.command_list->clearColor(0, ArgbToRenderColor(color_argb), clear_rects, clamped_count);
   if (clear_depth || clear_stencil) {
@@ -552,6 +555,7 @@ void Video::Present(GuestTexture *frontBuffer) {
   RecordPresentPass(s, rt, back, back_fb);
 
   const u32 cur = s.frame.load(std::memory_order_relaxed);
+  census::OnListEnd(s);
   s.command_lists[cur]->end();
   s.command_list_open = false;
 
@@ -565,6 +569,7 @@ void Video::Present(GuestTexture *frontBuffer) {
                                  s.fences[cur].get());
   }
   s.command_list_submitted[cur] = true;
+  census::OnPresent();
   ApplyVsync(s);
   {
     BD_CPU_ZONE("PresentSwap");
@@ -669,6 +674,7 @@ void Video::PresentOverlayFrame() {
       plume::RenderBarrierStage::GRAPHICS,
       plume::RenderTextureBarrier(back, plume::RenderTextureLayout::PRESENT));
 
+  census::OnListEnd(s);
   s.command_lists[cur]->end();
   s.command_list_open = false;
   const plume::RenderCommandList *lists[] = {s.command_lists[cur].get()};

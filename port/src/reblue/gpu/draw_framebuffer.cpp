@@ -8,6 +8,7 @@
  * @license   BSD 3-Clause License
  *            See LICENSE file in the project root for full license text.
  */
+#include "gpu/gpu_census.h"
 #include "gpu/frame.h"
 
 #include <atomic>
@@ -294,6 +295,7 @@ bool Video::BindDrawFramebufferLocked(bool color_clear_follows) {
   s.dirtyStates.scissorRect = true;
   Video::FlushViewport();
   if (discard_rt && msaa_rt && !color_clear_follows) {
+    census::Mark(s, census::kClear);
     s.command_list->clearColor(0, ArgbToRenderColor(0));
   }
   s.draw_framebuffer_bound = true;

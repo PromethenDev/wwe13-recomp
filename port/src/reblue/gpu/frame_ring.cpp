@@ -8,6 +8,7 @@
  * @license   BSD 3-Clause License
  *            See LICENSE file in the project root for full license text.
  */
+#include "gpu/gpu_census.h"
 #include "gpu/frame.h"
 
 #include <atomic>
@@ -228,6 +229,7 @@ void AdvanceAndWaitReused(VideoState &s) {
   s.command_list = s.command_lists[slot].get();
   if (s.command_list_submitted[slot]) {
     s.queue->waitForCommandFence(s.fences[slot].get());
+    census::OnSlotRetired(s, slot);
     s.command_list_submitted[slot] = false;
 #if defined(REXGLUE_ENABLE_PROFILING) && defined(REBLUE_D3D12)
     if (auto *ctx = GpuProfilerCtx()) {
@@ -243,6 +245,7 @@ void SubmitOpenListLocked(VideoState &s) {
   if (!s.command_list_open)
     return;
   const u32 cur = s.frame.load(std::memory_order_relaxed);
+  census::OnListEnd(s);
   s.command_lists[cur]->end();
   s.command_list_open = false;
   const plume::RenderCommandList *lists[] = {s.command_lists[cur].get()};

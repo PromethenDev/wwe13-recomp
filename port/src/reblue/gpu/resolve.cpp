@@ -8,6 +8,7 @@
  * @license   BSD 3-Clause License
  *            See LICENSE file in the project root for full license text.
  */
+#include "gpu/gpu_census.h"
 #include "gpu/frame.h"
 
 #include <atomic>
@@ -109,11 +110,13 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
     src->layout = plume::RenderTextureLayout::COPY_SOURCE;
     dst->layout = plume::RenderTextureLayout::COPY_DEST;
     if (dst_is_cube) {
+      census::Mark(s, census::kResolveCopy);
       s.command_list->copyTextureRegion(
           plume::RenderTextureCopyLocation::Subresource(
               dst->texture, dst->resolveLevel, dst->resolveFace),
           plume::RenderTextureCopyLocation::Subresource(src->texture, 0, 0));
     } else {
+      census::Mark(s, census::kResolveCopy);
       s.command_list->copyTexture(dst->texture, src->texture);
     }
   } else if (dst_is_cube) {
@@ -260,6 +263,7 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
     s.command_list->setGraphicsPushConstants(kCopyPushConstantRangeIndex, &push,
                                              kCopyPushConstantByteOffset,
                                              sizeof(push));
+    census::Mark(s, census::kResolveDraw);
     s.command_list->drawInstanced(3, 1, 0, 0);
 
     s.command_list->setFramebuffer(nullptr);
@@ -308,6 +312,7 @@ bool ClearColorTargetLocked(VideoState &s, GuestTexture *dst,
                             static_cast<float>(dst->height)));
   s.command_list->setScissors(plume::RenderRect(
       0, 0, static_cast<i32>(dst->width), static_cast<i32>(dst->height)));
+  census::Mark(s, census::kClear);
   s.command_list->clearColor(0, color);
   s.command_list->setFramebuffer(nullptr);
   s.draw_framebuffer_bound = false;
@@ -483,6 +488,7 @@ bool Video::ResolveRegion(u32 flags, GuestTexture *dst, u32 level, u32 face, i32
   src->layout = plume::RenderTextureLayout::COPY_SOURCE;
   dst->layout = plume::RenderTextureLayout::COPY_DEST;
   const plume::RenderBox box(left, top, right, bottom);
+  census::Mark(s, census::kResolveCopy);
   s.command_list->copyTextureRegion(
       plume::RenderTextureCopyLocation::Subresource(dst->texture, level, face),
       plume::RenderTextureCopyLocation::Subresource(src->texture, 0, 0), u32(dst_x), u32(dst_y),
@@ -518,6 +524,7 @@ bool Video::ReadbackTextureLevel(GuestTexture *src, u32 level, u32 face,
   plume::RenderTextureBarrier pre(src->texture, plume::RenderTextureLayout::COPY_SOURCE);
   s.command_list->barriers(plume::RenderBarrierStage::COPY, &pre, 1);
   src->layout = plume::RenderTextureLayout::COPY_SOURCE;
+  census::Mark(s, census::kResolveCopy);
   s.command_list->copyTextureRegion(
       plume::RenderTextureCopyLocation::PlacedFootprint(buffer.get(), src->format, w, h, 1,
                                                         row_pitch / 4u),
@@ -582,6 +589,7 @@ bool Video::UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32
   plume::RenderTextureBarrier pre(dst->texture, plume::RenderTextureLayout::COPY_DEST);
   s.command_list->barriers(plume::RenderBarrierStage::COPY, &pre, 1);
   dst->layout = plume::RenderTextureLayout::COPY_DEST;
+  census::Mark(s, census::kUpload);
   s.command_list->copyTextureRegion(
       plume::RenderTextureCopyLocation::Subresource(dst->texture, level, 0),
       plume::RenderTextureCopyLocation::PlacedFootprint(buffer.get(), dst->format, w, h, 1,
@@ -613,6 +621,7 @@ bool Video::SeedTextureBaseLevel(GuestTexture *dst, GuestTexture *src) {
   s.command_list->barriers(plume::RenderBarrierStage::COPY, pre, std::size(pre));
   src->layout = plume::RenderTextureLayout::COPY_SOURCE;
   dst->layout = plume::RenderTextureLayout::COPY_DEST;
+  census::Mark(s, census::kResolveCopy);
   s.command_list->copyTextureRegion(plume::RenderTextureCopyLocation::Subresource(dst->texture, 0, 0),
                                     plume::RenderTextureCopyLocation::Subresource(src->texture, 0, 0));
   return true;

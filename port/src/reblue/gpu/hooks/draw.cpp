@@ -32,6 +32,7 @@
 #include "core/logging.h"
 #include "core/memory_helpers.h"
 #include "core/profiling.h"
+#include "gpu/gpu_census.h"
 #include "gpu/constant_buffers.h"
 #include "gpu/cpu_zones.h"
 #include "gpu/d3d.h"
@@ -286,6 +287,7 @@ void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
   }
 
   auto *cmd_list = s.command_list;
+  bd::gpu::census::Mark(s, bd::gpu::census::kDraw, s.bound_fb_rt ? s.bound_fb_rt : s.bound_fb_ds);
   if (!cmd_list)
     return;
 

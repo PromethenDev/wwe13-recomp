@@ -7,6 +7,7 @@
  * @license   BSD 3-Clause License
  *            See LICENSE file in the project root for full license text.
  */
+#include "gpu/gpu_census.h"
 #include "gpu/frame.h"
 
 #include <memory>
@@ -129,6 +130,7 @@ GuestTexture *BuildBCMirrorCore(const BCMirrorDesc &d,
   t->layout = plume::RenderTextureLayout::COPY_DEST;
 
   for (u32 i = 0; i < upload_count; ++i) {
+    census::Mark(s, census::kUpload);
     s.command_list->copyTextureRegion(
         plume::RenderTextureCopyLocation::Subresource(
             t->texture, uploads[i].subresource, uploads[i].array_index),
@@ -324,6 +326,7 @@ void UploadTextureFromMapped(GuestTexture *tex) {
   tex->layout = plume::RenderTextureLayout::COPY_DEST;
 
   // rowWidth is in texels: pitch (bytes) / per-texel size.
+  census::Mark(s, census::kUpload);
   s.command_list->copyTextureRegion(
       plume::RenderTextureCopyLocation::Subresource(tex->texture, 0),
       plume::RenderTextureCopyLocation::PlacedFootprint(
