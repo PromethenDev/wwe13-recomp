@@ -192,7 +192,8 @@ public:
   // a non-null host-owned GuestTexture with a live RenderTexture.
   static void TrackResolveSource(u32 flags, GuestTexture *dst, u32 level = 0,
                                  u32 face = 0);
-  static void ResolveRtToTexture(GuestTexture *dst);
+  // rect (optional, wwe13_resolve_rect_draw): a format-converting copy draws only this rect.
+  static void ResolveRtToTexture(GuestTexture *dst, const plume::RenderRect *rect = nullptr);
   // Copies src's base level into dst's (same size and format): seeds a GPU-written texture with
   // the content the CPU put in its memory first. false if they differ.
   static bool SeedTextureBaseLevel(GuestTexture *dst, GuestTexture *src);

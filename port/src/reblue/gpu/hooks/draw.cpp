@@ -49,6 +49,9 @@
 // 4DC2A77541B851D7: 96 draws). Off skips all of them: empty stands, a lot less CPU and GPU work.
 bool Wwe12BeltProbe(u32 device_guest, u64 vs_hash, u32 count, u32 start);  // dev probe
 
+REXCVAR_DEFINE_BOOL(wwe13_resolve_rect_draw, false, "WWE13",
+                    "Format-converting resolves of a source rect draw only that rect (Xbox semantics), "
+                    "not the whole destination texture");
 REXCVAR_DEFINE_BOOL(wwe12_crowd, true, "WWE12",
                     "Draw the crowd. Off = empty stands, much faster on small PCs.");
 
@@ -770,6 +773,8 @@ u32 D3DDevice_Resolve_hook(u32 device_guest, u32 Flags, u32 pSourceRect,
     }
     return 0;
   }
+  plume::RenderRect rect_draw{};
+  bool use_rect = false;
 #if defined(SVR_NATIVE_RENDERER)
   // Copy the source rect (tiles, partial updates of a texture's mip levels; the whole
   // destination when there is none) to the dest point, unscaled, as the Xbox resolve does. A
@@ -797,10 +802,18 @@ u32 D3DDevice_Resolve_hook(u32 device_guest, u32 Flags, u32 pSourceRect,
       bd::gpu::SvrAfterResolve(pDestTexture, dst, DestLevel, DestSliceOrFace);
       return 0;
     }
+    // wwe13_resolve_rect_draw: a format-converting resolve of a source rect that lands at the
+    // same place (the 512x512 RGBA16F atlas tiles) draws only that rect, not the whole texture.
+    if (REXCVAR_GET(wwe13_resolve_rect_draw) && !(Flags & 0x4u) && DestLevel == 0 &&
+        DestSliceOrFace == 0 && bd::mem::try_at<const bd::gpu::D3DRect>(pSourceRect) &&
+        dx == left && dy == top && right > left && bottom > top) {
+      rect_draw = plume::RenderRect(left, top, right, bottom);
+      use_rect = true;
+    }
   }
 #endif
   bd::gpu::Video::TrackResolveSource(Flags, dst, DestLevel, DestSliceOrFace);
-  bd::gpu::Video::ResolveRtToTexture(dst);
+  bd::gpu::Video::ResolveRtToTexture(dst, use_rect ? &rect_draw : nullptr);
   return 0;
 }
 

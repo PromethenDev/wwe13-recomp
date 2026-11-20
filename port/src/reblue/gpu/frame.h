@@ -32,8 +32,10 @@ void ResolveEffectiveTargets(VideoState &s, GuestTexture *&rt,
 plume::RenderFramebuffer *GetFramebuffer(VideoState &s, GuestTexture *rt,
                                          GuestTexture *ds);
 
+// rect (optional): the converting draw writes only this destination rect (1:1, same size).
 bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
-                                GuestTexture *dst, const char *reason);
+                                GuestTexture *dst, const char *reason,
+                                const plume::RenderRect *rect = nullptr);
 bool MaterializeOutboundLocked(VideoState &s, GuestTexture *source,
                                bool aliasable_only = false);
 void MaterializeInboundLocked(VideoState &s, GuestTexture *dst);

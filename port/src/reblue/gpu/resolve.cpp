@@ -127,7 +127,8 @@ void DetachSourceSurfaceLocked(VideoState &s, GuestTexture *texture) {
 }
 
 bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
-                                GuestTexture *dst, const char *reason) {
+                                GuestTexture *dst, const char *reason,
+                                const plume::RenderRect *rect) {
   if (!dst || !dst->texture || !src || !src->texture || src == dst) {
     return false;
   }
@@ -280,8 +281,14 @@ bool CopySurfaceToTextureLocked(VideoState &s, GuestTexture *src,
       vp_h = static_cast<float>(src->height);
     }
     s.command_list->setViewports(plume::RenderViewport(0.0f, 0.0f, vp_w, vp_h));
-    s.command_list->setScissors(plume::RenderRect(
-        0, 0, static_cast<i32>(dst->width), static_cast<i32>(dst->height)));
+    // wwe13_resolve_rect_draw: only the resolved rect (1:1, same size, not a first write that
+    // discarded the texture), as the Xbox resolve writes; else the whole destination.
+    if (rect && !discard_dst && dims_match && !needs_scale &&
+        src->sampleCount == plume::RenderSampleCount::COUNT_1)
+      s.command_list->setScissors(*rect);
+    else
+      s.command_list->setScissors(plume::RenderRect(
+          0, 0, static_cast<i32>(dst->width), static_cast<i32>(dst->height)));
     plume::RenderPipeline *pipeline = nullptr;
     if (src->sampleCount != plume::RenderSampleCount::COUNT_1) {
       pipeline = GetOrCreateResolveMSAAPipeline(s, dst->format,
@@ -493,7 +500,7 @@ void NoteTileContentLocked(VideoState &s, GuestTexture *dst) {
 
 } // namespace
 
-void Video::ResolveRtToTexture(GuestTexture *dst) {
+void Video::ResolveRtToTexture(GuestTexture *dst, const plume::RenderRect *rect) {
   BD_CPU_ZONE("ResolveRtToTexture");
   if (!dst || !dst->texture)
     return;
@@ -525,7 +532,7 @@ void Video::ResolveRtToTexture(GuestTexture *dst) {
     return;
   }
 
-  if (CopySurfaceToTextureLocked(s, src, dst, "Resolve")) {
+  if (CopySurfaceToTextureLocked(s, src, dst, "Resolve", rect)) {
     s.last_resolved_dst = dst;
     NoteTileContentLocked(s, dst);
     DetachSourceSurfaceLocked(s, dst);
