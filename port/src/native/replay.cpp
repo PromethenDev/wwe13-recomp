@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -73,6 +74,9 @@ struct ReplayState {
   std::unordered_set<uint32_t> skip_resolves;  // wwe13_replay_skip
   uint32_t resolve_ordinal = 0;                // per pass
   uint32_t skipped = 0;
+  // CPU time per hook (renderer side) and per record kind, for the renderer CPU profile.
+  std::unordered_map<std::string, std::pair<double, uint64_t>> hook_ms;  // name -> (ms, calls)
+  double pages_ms = 0, mem_ms = 0, device_ms = 0, other_ms = 0;
 };
 
 // Reads <dir>/recording.w13r into one flat byte stream: each chunk is uncompressed (miniz
@@ -266,7 +270,11 @@ void ApplyCall(ReplayState& s, const uint8_t* body, uint32_t bytes) {
     return;
   }
 
+  const auto h0 = std::chrono::steady_clock::now();
   hook->fn(ctx, uint32_t(ev.return_value), s.memory->virtual_membase());
+  auto& hm = s.hook_ms[hook->name];
+  hm.first += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - h0).count();
+  ++hm.second;
   ++s.calls;
 }
 
@@ -370,10 +378,13 @@ void RunPass(ReplayState& s, const std::vector<uint8_t>& stream) {
     p += sizeof(h);
     if (p + h.bytes > stream.size()) break;
     const uint8_t* body = stream.data() + p;
+    const auto r0 = std::chrono::steady_clock::now();
+    double* bucket = &s.other_ms;
     switch (h.type) {
       case svr::recorder::kBasePage:
       case svr::recorder::kFramePage:
         ApplyPage(s, body, h.bytes);
+        bucket = &s.pages_ms;
         break;
       case svr::recorder::kShader:
         if (h.bytes > 8) {
@@ -392,15 +403,18 @@ void RunPass(ReplayState& s, const std::vector<uint8_t>& stream) {
         break;
       case svr::recorder::kDevice:
         ApplyDevice(s, body, h.bytes);
+        bucket = &s.device_ms;
         break;
       case svr::recorder::kMem:
         ApplyMem(s, body, h.bytes);
+        bucket = &s.mem_ms;
         break;
       case svr::recorder::kTarget:
         ApplyTarget(s, body, h.bytes);
         break;
       case svr::recorder::kCall:
         ApplyCall(s, body, h.bytes);
+        bucket = nullptr;  // timed per hook inside
         break;
       case svr::recorder::kFrameEnd: {
         uint32_t index = 0;
@@ -412,6 +426,8 @@ void RunPass(ReplayState& s, const std::vector<uint8_t>& stream) {
       default:
         return;  // unknown record type: stop this pass
     }
+    if (bucket)
+      *bucket += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - r0).count();
     p += h.bytes;
   }
 }
@@ -478,7 +494,7 @@ bool Run(rex::ui::Window* window) {
               s.png_frames.size());
 
   const int loops = std::max(1, REXCVAR_GET(wwe13_replay_loops));
-  uint64_t total_frames = 0, total_calls = 0;
+  uint64_t total_frames = 0, total_calls = 0, profile_frames_skip = 0;
   const auto t0 = std::chrono::steady_clock::now();
   const std::string ab = REXCVAR_GET(wwe13_replay_ab);
   for (int i = 0; i < loops; ++i) {
@@ -496,11 +512,33 @@ bool Run(rex::ui::Window* window) {
       REXLOG_INFO("[replay] {}{:.1f} ms/frame", label, lms);
       bd::gpu::census::Flush(label.c_str());
     }
+    if (i == 0 && loops > 1) {
+      // Loop 0 builds pipelines and uploads textures: profile the warm loops only.
+      s.hook_ms.clear();
+      s.pages_ms = s.mem_ms = s.device_ms = s.other_ms = 0;
+      profile_frames_skip += s.frames;
+    }
     total_frames += s.frames;
     total_calls += s.calls;
   }
   const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   const double ms = total_frames ? secs * 1000.0 / double(total_frames) : 0.0;
+  {
+    // Renderer CPU profile: hook (renderer side) time vs the replay's own memory restore.
+    const double nf = double(std::max<uint64_t>(1, total_frames - profile_frames_skip));
+    double hooks = 0;
+    std::vector<std::pair<double, std::string>> order;
+    for (const auto& [name, v] : s.hook_ms) {
+      hooks += v.first;
+      order.push_back({v.first, name});
+    }
+    std::sort(order.rbegin(), order.rend());
+    REXLOG_INFO("[replay-cpu] per frame: hooks {:.2f} ms | pages {:.2f} | kMem {:.2f} | device {:.2f} | other {:.2f}",
+                hooks / nf, s.pages_ms / nf, s.mem_ms / nf, s.device_ms / nf, s.other_ms / nf);
+    for (const auto& [ms, name] : order)
+      REXLOG_INFO("[replay-cpu]   {:34s} {:7.3f} ms/frame  {:7.1f} calls/frame  {:6.2f} us/call", name,
+                  ms / nf, double(s.hook_ms[name].second) / nf, ms * 1000.0 / double(std::max<uint64_t>(1, s.hook_ms[name].second)));
+  }
   REXLOG_INFO("[replay] {} frames, avg {:.1f} ms/frame ({} calls, {} loop{}, {} resolves skipped, "
               "{} per pass)", total_frames, ms, total_calls, loops, loops == 1 ? "" : "s", s.skipped,
               s.resolve_ordinal);
