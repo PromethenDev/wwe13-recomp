@@ -4,9 +4,12 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <memory>
+#include <unordered_map>
 #include <string>
 
+#include <fmt/format.h>
 #include <rex/cvar.h>
 #include <rex/logging.h>
 
@@ -90,6 +93,77 @@ void HookProfileTick(uint64_t frame) {
   REXLOG_INFO("[hook-cpu] total over {} frames: guest {:.3f} ms/frame | renderer {:.3f} ms/frame", frames,
               guest_total / 1e6 / frames, host_total / 1e6 / frames);
   frames = 0;
+}
+}  // namespace svr
+
+REXCVAR_DEFINE_BOOL(wwe13_guest_write_probe, false, "WWE13",
+                    "Test: log which bytes of the D3D device each hooked game function changes "
+                    "([guest-writes]); slows the game");
+
+namespace svr {
+bool g_guest_probe = false;
+namespace {
+constexpr uint32_t kProbeBytes = 0x5FB0;  // sizeof(D3DDevice) the renderer knows
+struct ProbeSet {
+  uint8_t changed[kProbeBytes] = {};
+  uint64_t calls = 0, sampled = 0;
+  bool grew = false;
+};
+// Render thread only (the hooked D3D calls and the frame tick run there).
+std::unordered_map<std::string, ProbeSet>& ProbeSets() {
+  static std::unordered_map<std::string, ProbeSet> sets;
+  return sets;
+}
+thread_local uint8_t t_probe_before[kProbeBytes];
+thread_local ProbeSet* t_probe_active = nullptr;
+}  // namespace
+void GuestProbeBegin(const char* name, uint32_t device, const uint8_t* base) {
+  t_probe_active = nullptr;
+  if (std::strncmp(name, "D3DDevice_", 10) != 0 || !device)
+    return;
+  ProbeSet& set = ProbeSets()[name];
+  if (set.calls++ % 8 != 0)
+    return;
+  std::memcpy(t_probe_before, base + device, kProbeBytes);
+  t_probe_active = &set;
+}
+void GuestProbeEnd(const char* /*name*/, uint32_t device, const uint8_t* base) {
+  ProbeSet* set = t_probe_active;
+  if (!set)
+    return;
+  t_probe_active = nullptr;
+  ++set->sampled;
+  const uint8_t* now = base + device;
+  for (uint32_t i = 0; i < kProbeBytes; ++i) {
+    if (now[i] != t_probe_before[i] && !set->changed[i]) {
+      set->changed[i] = 1;
+      set->grew = true;
+    }
+  }
+}
+void GuestProbeTick(uint64_t frame) {
+  g_guest_probe = REXCVAR_GET(wwe13_guest_write_probe);
+  if (!g_guest_probe || frame % 600 != 0)
+    return;
+  for (auto& [name, set] : ProbeSets()) {
+    if (!set.grew)
+      continue;
+    set.grew = false;
+    std::string ranges;
+    for (uint32_t i = 0; i < kProbeBytes;) {
+      if (!set.changed[i]) {
+        ++i;
+        continue;
+      }
+      uint32_t j = i;
+      while (j < kProbeBytes && set.changed[j])
+        ++j;
+      ranges += fmt::format(" {:X}-{:X}", i, j - 1);
+      i = j;
+    }
+    REXLOG_INFO("[guest-writes] {} ({} of {} calls sampled): device bytes changed by the game's function:{}",
+                name, set.sampled, set.calls, ranges.size() > 1500 ? ranges.substr(0, 1500) + " ..." : ranges);
+  }
 }
 bool HookEnabled(const char* name) {
   const std::string list = "," + REXCVAR_GET(svr_hooks_off) + ",";

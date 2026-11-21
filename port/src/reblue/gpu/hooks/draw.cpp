@@ -80,10 +80,13 @@ REXCVAR_DEFINE_BOOL(svr_edge_blur, false, "SvR",
 #include "gpu/output.h"
 #include "gpu/shaders/shader_cache.h"
 
+namespace bd::gpu {
+extern std::atomic<u64> g_live_ab_draws;  // svr_resources.cpp: draws per live A/B segment
+}
 // Replay CPU profile of the draw path (svr::replay sets g_draw_profile): ns per section.
 namespace bd::gpu {
 bool g_draw_profile = false;
-std::atomic<u64> g_draw_prof_ns[6]{};  // geometry, pre, framebuffer, flush, record, draws
+std::atomic<u64> g_draw_prof_ns[7]{};  // geometry, pre, framebuffer, flush, record, draws, draws issued
 }  // namespace bd::gpu
 
 namespace {
@@ -146,6 +149,7 @@ plume::RenderPrimitiveTopology MapPrimitiveType(u32 prim) {
 void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
                   const DrawArgs &args = {}) {
   WWE12_CPU_ZONE(kDraws);
+  bd::gpu::g_live_ab_draws.fetch_add(1, std::memory_order_relaxed);
   if (bd::gpu::g_draw_profile) bd::gpu::g_draw_prof_ns[5].fetch_add(1, std::memory_order_relaxed);
   DrawProfSection prof_pre(1);
 #if defined(SVR_NATIVE_RENDERER)
@@ -318,6 +322,7 @@ void DispatchDraw(u32 device_guest, u32 primitive_type, const char *name,
     }
   }
   DrawProfSection prof_record(4);
+  if (bd::gpu::g_draw_profile) bd::gpu::g_draw_prof_ns[6].fetch_add(1, std::memory_order_relaxed);
 
   auto *cmd_list = s.command_list;
   bd::gpu::census::Mark(s, bd::gpu::census::kDraw, s.bound_fb_rt ? s.bound_fb_rt : s.bound_fb_ds);

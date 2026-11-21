@@ -313,6 +313,7 @@ REXCVAR_DEFINE_BOOL(svr_reuse_constant_blocks, true, "SvR",
 REXCVAR_DEFINE_BOOL(svr_reuse_constant_blocks, false, "SvR",
                     "Reuse the previous constant block when the game's bytes are unchanged");
 #endif
+REXCVAR_DECLARE(bool, wwe13_draw_fast_path);  // svr_resources.cpp: pixel-shader block only
 struct StageBlockCache {
   u8 raw[kConstantBlockBytes];
   ConstantAllocation alloc;
@@ -323,8 +324,8 @@ std::atomic<u64> g_constant_blocks_uploaded{0}, g_constant_blocks_reused{0};
 
 // Returns the cached block if `raw` and `key` match the last upload of this frame.
 bool ReuseBlock(StageBlockCache &cache, const UploadState &s, const u8 *raw, u64 key,
-                ConstantAllocation &out) {
-  if (!REXCVAR_GET(svr_reuse_constant_blocks) || !raw || cache.epoch != s.epoch || cache.key != key ||
+                ConstantAllocation &out, bool enabled) {
+  if (!enabled || !raw || cache.epoch != s.epoch || cache.key != key ||
       std::memcmp(cache.raw, raw, kConstantBlockBytes) != 0)
     return false;
   out = cache.alloc;
@@ -333,9 +334,9 @@ bool ReuseBlock(StageBlockCache &cache, const UploadState &s, const u8 *raw, u64
 }
 
 void RememberBlock(StageBlockCache &cache, const UploadState &s, const u8 *raw, u64 key,
-                   const ConstantAllocation &alloc) {
+                   const ConstantAllocation &alloc, bool enabled) {
   g_constant_blocks_uploaded.fetch_add(1, std::memory_order_relaxed);
-  if (!REXCVAR_GET(svr_reuse_constant_blocks) || !raw)
+  if (!enabled || !raw)
     return;
   std::memcpy(cache.raw, raw, kConstantBlockBytes);
   cache.alloc = alloc;
@@ -352,14 +353,16 @@ ConstantAllocation UploadVertexShaderConstants(u32 device_guest) {
   static StageBlockCache cache;
   const u32 src_va = device_guest + offsetof(D3DDevice, vsFloatConstants);
   const auto *raw = bd::mem::at<const u8>(src_va);
+  // The vertex block changes on nearly every draw (world matrices): only the old option tries it.
+  const bool reuse = REXCVAR_GET(svr_reuse_constant_blocks);
   ConstantAllocation alloc;
-  if (ReuseBlock(cache, s, raw, 0, alloc))
+  if (ReuseBlock(cache, s, raw, 0, alloc, reuse))
     return alloc;
   alloc = Allocate(s, kConstantBlockBytes, kCBVAlignment);
   if (!alloc.memory)
     return {};
   CopyByteSwap32FlushNaN(alloc.memory, src_va, kConstantBlockBytes);
-  RememberBlock(cache, s, raw, 0, alloc);
+  RememberBlock(cache, s, raw, 0, alloc, reuse);
   return alloc;
 }
 
@@ -375,8 +378,9 @@ ConstantAllocation UploadPixelShaderConstants(u32 device_guest, bool zero_dof) {
   // The edits made after the copy depend on the pixel shader (blur pin) and on zero_dof.
   auto *ps = bd::gpu::state().pipelineState.pixelShader;
   const u64 key = ((ps && ps->shaderCacheEntry) ? ps->shaderCacheEntry->hash : 0) ^ (zero_dof ? 1 : 0);
+  const bool reuse = REXCVAR_GET(svr_reuse_constant_blocks) || REXCVAR_GET(wwe13_draw_fast_path);
   ConstantAllocation alloc;
-  if (ReuseBlock(cache, s, raw, key, alloc))
+  if (ReuseBlock(cache, s, raw, key, alloc, reuse))
     return alloc;
   alloc = Allocate(s, kConstantBlockBytes, kCBVAlignment);
   if (!alloc.memory)
@@ -385,7 +389,7 @@ ConstantAllocation UploadPixelShaderConstants(u32 device_guest, bool zero_dof) {
   PinScreenUVScaleReg(alloc.memory);
   if (zero_dof)
     std::memset(alloc.memory + 20 * 16, 0, 2 * 16);  // g_f4DOFParam, g_f4DOFParam2
-  RememberBlock(cache, s, raw, key, alloc);
+  RememberBlock(cache, s, raw, key, alloc, reuse);
   return alloc;
 }
 

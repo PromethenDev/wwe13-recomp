@@ -38,6 +38,7 @@
 
 namespace svr {
 void HookProfileTick(uint64_t frame);  // wwe13_native_stubs.cpp (live hook CPU profile)
+void GuestProbeTick(uint64_t frame);   // wwe13_native_stubs.cpp (guest write probe)
 }
 
 // src/native/crash_trace.cpp: hang watchdog, fed once per presented frame.
@@ -125,6 +126,9 @@ struct HostTarget {
 };
 std::unordered_map<u32, HostTarget> g_surfaces;  // D3DSurface VA -> host render target
 std::unordered_map<u32, HostTarget> g_targets;   // texture VA -> GPU-written host texture
+// Bumped (under g_mutex) whenever g_targets gains or loses an entry: SvrResolveTexture's per-thread
+// fast-path cache (wwe13_draw_fast_path) holds only textures that were not targets at that count.
+std::atomic<u64> g_targets_gen{0};
 
 // Predicated tiling: WWE '12 renders its 3D scenes (matches, entrances) into an EDRAM surface one
 // tile wide (320x736 for 4 tiles of 1280x720), draws the scene once, and the Xbox GPU replays it
@@ -195,6 +199,7 @@ bool TargetCurrent(u32 texture_va, std::unordered_map<u32, HostTarget>::iterator
           fetch.size_2d.width + 1, fetch.size_2d.height + 1, u32(fetch.format));
   RetireHost(it->second.host);
   g_targets.erase(it);
+  g_targets_gen.fetch_add(1, std::memory_order_relaxed);
   return false;
 }
 
@@ -390,6 +395,7 @@ static void ReleaseIdleSurfaces(u64 frame) {
     if (rebuildable && frame - it->second.last_used > kTargetIdleFrames) {
       RetireHost(it->second.host);
       it = g_targets.erase(it);
+      g_targets_gen.fetch_add(1, std::memory_order_relaxed);
     } else {
       ++it;
     }
@@ -508,6 +514,7 @@ GuestTexture *SvrResolveTarget(u32 texture_va, float scale) {
     RetireHost(it->second.host);  // resolved from a surface of another scale now
     g_targets.erase(it);
   }
+  g_targets_gen.fetch_add(1, std::memory_order_relaxed);  // an entry is added on every path below
   rex::graphics::xenos::xe_gpu_texture_fetch_t fetch{};
   if (!ReadFetch(texture_va, fetch)) {
     g_targets.emplace(texture_va, HostTarget{});
@@ -1319,26 +1326,50 @@ REXCVAR_DEFINE_STRING(wwe13_live_ab, "", "WWE13",
 REXCVAR_DEFINE_INT32(wwe13_live_ab_seconds, 10, "WWE13", "Live in-run A/B segment length")
     .range(2, 600);
 
+std::atomic<u64> g_live_ab_draws{0};  // draw hook calls (hooks/draw.cpp), for the [ab] scene column
+
 namespace {
 void LiveAbTick() {
-  static const std::string flag = REXCVAR_GET(wwe13_live_ab);
-  if (flag.empty())
+  static const std::string spec = REXCVAR_GET(wwe13_live_ab);
+  if (spec.empty())
     return;
-  // A comma list switches several options together (a bundle).
-  static const std::vector<std::string> flags = [] {
+  // Arms are separated by ';' (or '+'); each arm is a comma list of options switched together
+  // (a bundle). Segments alternate off / arm 1 / off / arm 2 / ... so every on-segment has two
+  // off neighbours from the same minute.
+  static const std::vector<std::vector<std::string>> arms = [] {
+    std::vector<std::vector<std::string>> out(1);
+    std::string cur;
+    for (size_t i = 0; i <= spec.size(); ++i) {
+      const char c = i < spec.size() ? spec[i] : ';';
+      if (c == ',' || c == ';' || c == '+') {
+        if (!cur.empty())
+          out.back().push_back(cur);
+        cur.clear();
+        if ((c == ';' || c == '+') && !out.back().empty() && i < spec.size())
+          out.emplace_back();
+      } else {
+        cur += c;
+      }
+    }
+    if (out.back().empty())
+      out.pop_back();
+    return out;
+  }();
+  if (arms.empty())
+    return;
+  static const std::vector<std::string> arm_names = [] {
     std::vector<std::string> out;
-    size_t i = 0;
-    while (i <= flag.size()) {
-      const size_t j = std::min(flag.find(',', i), flag.size());
-      if (j > i)
-        out.push_back(flag.substr(i, j - i));
-      i = j + 1;
+    for (const auto &arm : arms) {
+      std::string n;
+      for (const auto &f : arm)
+        n += (n.empty() ? "" : ",") + f;
+      out.push_back(n);
     }
     return out;
   }();
   // "name=value": on sets value, off sets 0 (numeric options); plain name: true / false.
-  const auto set_all = [](bool v) {
-    for (const auto &f : flags) {
+  const auto set_arm = [](size_t arm, bool v) {
+    for (const auto &f : arms[arm]) {
       const size_t eq = f.find('=');
       const std::string name = eq == std::string::npos ? f : f.substr(0, eq);
       const std::string value = eq == std::string::npos ? (v ? "true" : "false")
@@ -1349,15 +1380,18 @@ void LiveAbTick() {
   };
   using clock = std::chrono::steady_clock;
   static bool started = false, on = false;
+  static size_t arm = 0;
   static clock::time_point seg_start, last;
   static std::vector<float> ms;
   static u32 segment = 0;
   const auto now = clock::now();
   if (!started) {
     started = true;
-    set_all(false);
+    for (size_t a = 0; a < arms.size(); ++a)
+      set_arm(a, false);
     seg_start = last = now;
     ms.reserve(4096);
+    g_live_ab_draws.store(0, std::memory_order_relaxed);
     return;
   }
   ms.push_back(std::chrono::duration<float, std::milli>(now - last).count());
@@ -1375,12 +1409,20 @@ void LiveAbTick() {
     on_time += v <= 17.5f;  // one 60 Hz refresh (16.7 ms) plus timer slack
   }
   const size_t n = sorted.size();
-  BD_INFO("[ab] seg {} {}={} {:.1f} s: {} frames, {:.2f} fps, median {:.2f} ms, p99 {:.2f} ms, >33ms {}, <=17ms {:.1f} %",
-          segment, flag, on ? "on" : "off", secs, n, n / secs, sorted[n / 2],
-          sorted[std::min(n - 1, n * 99 / 100)], slow, n ? 100.0 * on_time / n : 0.0);
+  const u64 draws = g_live_ab_draws.exchange(0, std::memory_order_relaxed);
+  BD_INFO("[ab] seg {} {}={} {:.1f} s: {} frames, {:.2f} fps, median {:.2f} ms, p99 {:.2f} ms, >33ms {}, "
+          "<=17ms {:.1f} %, draws/frame {:.0f}",
+          segment, arm_names[arm], on ? "on" : "off", secs, n, n / secs, sorted[n / 2],
+          sorted[std::min(n - 1, n * 99 / 100)], slow, n ? 100.0 * on_time / n : 0.0,
+          n ? double(draws) / n : 0.0);
   ++segment;
+  if (on) {
+    set_arm(arm, false);
+    arm = (arm + 1) % arms.size();  // the next off segment is labelled with the arm that follows it
+  } else {
+    set_arm(arm, true);
+  }
   on = !on;
-  set_all(on);
   ms.clear();
   seg_start = now;
 }
@@ -1391,6 +1433,7 @@ void SvrOnFrame() {
   LiveAbTick();
   const u64 frame = g_frame.fetch_add(1, std::memory_order_relaxed);
   ::svr::HookProfileTick(frame);
+  ::svr::GuestProbeTick(frame);
   g_frame_index.store(frame, std::memory_order_relaxed);
   SvrProcessDeferredReadbacks(frame);
   g_surface_frame.store(frame, std::memory_order_relaxed);
@@ -1445,11 +1488,36 @@ static GuestTexture *TargetWithSameMemory(u32 texture_va) {
 // reloading into reused memory), so a mirror is checked against its source once per frame it's
 // used and rebuilt when the fetch constant or the bytes changed. A texture that can't be mirrored
 // is remembered the same way, so it isn't retried (or logged) until it changes.
+// Fast path (wwe13_draw_fast_path, default off): a texture that is not a GPU target and was already
+// checked this frame resolves to the same mirror for the rest of the frame (the code below returns
+// check.host without touching anything), so that answer is kept per thread, keyed by frame and by
+// the g_targets count, and the lock and the two map lookups are skipped.
+REXCVAR_DEFINE_BOOL(wwe13_draw_fast_path, false, "WWE13",
+                    "Draw fast path: reuse this frame's texture lookups and the unchanged pixel-shader "
+                    "constant block between draws (same picture)");
+
+namespace {
+struct ResolveCacheEntry {
+  u32 va = 0;
+  u64 frame = ~0ull, gen = ~0ull;
+  GuestTexture *host = nullptr;
+};
+thread_local ResolveCacheEntry t_resolve_cache[256];
+inline ResolveCacheEntry &ResolveCacheSlot(u32 va) { return t_resolve_cache[(va * 2654435761u) >> 24]; }
+}  // namespace
+
 GuestTexture *SvrResolveTexture(u32 texture_va) {
   WWE12_CPU_ZONE(kTextures);
   if (!texture_va)
     return nullptr;
   const u64 frame = g_frame.load(std::memory_order_relaxed);
+  const bool fast = REXCVAR_GET(wwe13_draw_fast_path);
+  if (fast) {
+    const ResolveCacheEntry &e = ResolveCacheSlot(texture_va);
+    if (e.va == texture_va && e.frame == frame &&
+        e.gen == g_targets_gen.load(std::memory_order_relaxed))
+      return e.host;
+  }
   std::lock_guard lock(g_mutex);
   if (auto it = g_targets.find(texture_va);
       it != g_targets.end() && it->second.host && TargetCurrent(texture_va, it)) {
@@ -1457,8 +1525,15 @@ GuestTexture *SvrResolveTexture(u32 texture_va) {
     return it->second.host;
   }
   MirrorCheck &check = g_mirror_checks[texture_va];
-  if (check.frame == frame)
+  if (check.frame == frame) {
+    if (fast && check.host) {
+      // Not a target (the lookup above missed or retired it) and already checked this frame.
+      ResolveCacheEntry &e = ResolveCacheSlot(texture_va);
+      e.va = texture_va, e.frame = frame, e.host = check.host;
+      e.gen = g_targets_gen.load(std::memory_order_relaxed);
+    }
     return check.host ? check.host : TargetWithSameMemory(texture_va);
+  }
   NativeMirrorSource src;
   if (!GetNativeMirrorSource(texture_va, src)) {
     check.frame = frame;

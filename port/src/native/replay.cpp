@@ -57,7 +57,7 @@ REXCVAR_DEFINE_STRING(wwe13_replay_ab, "", "WWE13",
 
 namespace bd::gpu {
 extern bool g_draw_profile;
-extern std::atomic<uint64_t> g_draw_prof_ns[6];
+extern std::atomic<uint64_t> g_draw_prof_ns[7];
 extern std::atomic<uint64_t> g_flush_prof_ns[5];
 }  // namespace bd::gpu
 
@@ -517,26 +517,31 @@ bool Run(rex::ui::Window* window) {
       b = e + 1;
     }
     // Renderer CPU of this loop: every hook but Swap (which holds the vsync wait), and the draws.
-    const auto cpu_now = [&s](double& draws) {
+    const auto cpu_now = [&s](double& draws, double& textures) {
       double all = 0;
-      draws = 0;
+      draws = textures = 0;
       for (const auto& [name, v] : s.hook_ms) {
         if (name != "D3DDevice_Swap") all += v.first;
         if (name.find("Vertices") != std::string::npos) draws += v.first;
+        if (name == "D3DDevice_SetTexture") textures += v.first;
       }
       return all;
     };
-    double draws0 = 0, draws1 = 0;
-    const double cpu0 = cpu_now(draws0);
+    double draws0 = 0, draws1 = 0, tex0 = 0, tex1 = 0;
+    const double cpu0 = cpu_now(draws0, tex0);
+    const uint64_t psc0 = bd::gpu::g_flush_prof_ns[2].load();
     const auto l0 = std::chrono::steady_clock::now();
     RunPass(s, stream);
     if (!ab.empty()) {
       const double lms = std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - l0).count() / std::max(1u, s.frames);
       const std::string label = "loop " + std::to_string(i) + " " + ab + "=" + ((i & 1) ? "on" : "off") + ": ";
-      const double cpu1 = cpu_now(draws1);
-      REXLOG_INFO("[replay] {}{:.1f} ms/frame | renderer CPU without Swap {:.3f} ms/frame, draws {:.3f}", label,
-                  lms, (cpu1 - cpu0) / std::max(1u, s.frames), (draws1 - draws0) / std::max(1u, s.frames));
+      const double cpu1 = cpu_now(draws1, tex1);
+      const double nfr = double(std::max(1u, s.frames));
+      REXLOG_INFO("[replay] {}{:.1f} ms/frame | renderer CPU without Swap {:.3f} ms/frame, draws {:.3f}, "
+                  "SetTexture {:.3f}, PS constants {:.3f}", label, lms, (cpu1 - cpu0) / nfr,
+                  (draws1 - draws0) / nfr, (tex1 - tex0) / nfr,
+                  double(bd::gpu::g_flush_prof_ns[2].load() - psc0) / 1e6 / nfr);
       bd::gpu::census::Flush(label.c_str());
     }
     if (i == 0 && loops > 1) {
@@ -566,8 +571,8 @@ bool Run(rex::ui::Window* window) {
       const double draws = double(std::max<uint64_t>(1, bd::gpu::g_draw_prof_ns[5].load()));
       const auto us = [&](int i) { return double(bd::gpu::g_draw_prof_ns[i].load()) / 1000.0 / draws; };
       REXLOG_INFO("[replay-cpu] per draw (us): geometry {:.2f} | pre {:.2f} | framebuffer {:.2f} | "
-                  "flush state {:.2f} | record {:.2f} ({:.0f} draws/frame)",
-                  us(0), us(1), us(2), us(3), us(4), draws / nf);
+                  "flush state {:.2f} | record {:.2f} ({:.0f} draws/frame, {:.0f} reach the command list)",
+                  us(0), us(1), us(2), us(3), us(4), draws / nf, double(bd::gpu::g_draw_prof_ns[6].load()) / nf);
       const auto fus = [&](int i) { return double(bd::gpu::g_flush_prof_ns[i].load()) / 1000.0 / draws; };
       REXLOG_INFO("[replay-cpu] flush state per draw (us): state+pipeline {:.2f} | VS consts {:.2f} | "
                   "PS consts {:.2f} | shared consts {:.2f} | streams/rest {:.2f}",

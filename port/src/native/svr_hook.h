@@ -68,6 +68,14 @@ inline uint64_t HookNow() {
 // Call once per frame (render thread): refreshes g_hook_profile and logs the totals.
 void HookProfileTick(uint64_t frame);
 
+// Guest write probe (wwe13_guest_write_probe, default off): which bytes of the D3D device
+// (r3 of every D3DDevice_* call, its 0x5FB0 bytes) the game's own function changes, per hook,
+// sampled every 8th call. Logged as merged offset ranges ([guest-writes]) when the set grows.
+// Tells what a hook could stop running without the renderer losing state it reads back.
+extern bool g_guest_probe;
+void GuestProbeBegin(const char *name, uint32_t device, const uint8_t *base);
+void GuestProbeEnd(const char *name, uint32_t device, const uint8_t *base);
+
 }  // namespace svr
 
 namespace svr::recorder {
@@ -89,7 +97,11 @@ void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
     ::svr::CopyArgs(svr_args, ctx);                              \
     static ::svr::HookProf *const svr_prof = ::svr::RegisterHookProf(#subroutine); \
     const uint64_t svr_t0 = ::svr::g_hook_profile ? ::svr::HookNow() : 0; \
+    if (::svr::g_guest_probe)                                    \
+      ::svr::GuestProbeBegin(#subroutine, svr_args.r3.u32, base); \
     __imp__##subroutine(ctx, base);                              \
+    if (::svr::g_guest_probe)                                    \
+      ::svr::GuestProbeEnd(#subroutine, svr_args.r3.u32, base);  \
     const uint64_t svr_t1 = svr_t0 ? ::svr::HookNow() : 0;       \
     ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, false); \
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
@@ -119,7 +131,11 @@ void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
     if (svr_on)                                                  \
       rex::ppc::HostToGuestFunction<function>(svr_args, base);   \
     const uint64_t svr_t1 = svr_t0 ? ::svr::HookNow() : 0;       \
+    if (::svr::g_guest_probe)                                    \
+      ::svr::GuestProbeBegin(#subroutine, svr_args.r3.u32, base); \
     __imp__##subroutine(ctx, base);                              \
+    if (::svr::g_guest_probe)                                    \
+      ::svr::GuestProbeEnd(#subroutine, svr_args.r3.u32, base);  \
     if (svr_t0) {                                                \
       svr_prof->host_ns.fetch_add(svr_t1 - svr_t0, std::memory_order_relaxed); \
       svr_prof->guest_ns.fetch_add(::svr::HookNow() - svr_t1, std::memory_order_relaxed); \
@@ -139,7 +155,11 @@ void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
     ::svr::CopyArgs(svr_args, ctx);                              \
     static ::svr::HookProf *const svr_prof = ::svr::RegisterHookProf(#subroutine); \
     const uint64_t svr_t0 = ::svr::g_hook_profile ? ::svr::HookNow() : 0; \
+    if (::svr::g_guest_probe)                                    \
+      ::svr::GuestProbeBegin(#subroutine, svr_args.r3.u32, base); \
     __imp__##subroutine(ctx, base);                              \
+    if (::svr::g_guest_probe)                                    \
+      ::svr::GuestProbeEnd(#subroutine, svr_args.r3.u32, base);  \
     const uint64_t svr_t1 = svr_t0 ? ::svr::HookNow() : 0;       \
     ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, true); \
     static const bool svr_on = ::svr::HookEnabled(#subroutine);  \
