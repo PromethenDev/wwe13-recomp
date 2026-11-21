@@ -67,7 +67,7 @@ extern bool VulkanDxgiPresent;  // plume_vulkan_dxgi.cpp
 } // namespace plume
 
 #if !defined(REBLUE_D3D11) && !defined(REBLUE_D3D12) && defined(_WIN32)
-REXCVAR_DEFINE_BOOL(wwe13_vk_dxgi_present, false, "WWE13",
+REXCVAR_DEFINE_BOOL(wwe13_vk_dxgi_present, true, "WWE13",
                     "Vulkan: present through a DXGI flip-model swap chain (shared D3D11 textures + keyed "
                     "mutex) instead of the Vulkan swap chain, which the Intel UHD 630 composes by a copy")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
