@@ -75,6 +75,13 @@ REXCVAR_DEFINE_INT32(svr_readback_streak, 32, "SvR",
                      "until it rests (then it is copied once more). Was 6: attires the game builds "
                      "over more resolves stayed white")
     .range(1, 1000);
+// 11-21: at a scene start every per-frame target (shadow / lighting maps, 64x64 tiles...) is read back
+// synchronously for its first svr_readback_streak frames, each resolve with its own GPU wait (bursts of
+// 40-50 ms frames). On: those streak read-backs are collected and done once per target per frame at the
+// frame's Swap, all with ONE GPU wait. Still every frame during the streak (attire builds, issue #27).
+REXCVAR_DEFINE_BOOL(svr_readback_batch, false, "SvR",
+                    "Streak read-backs batched at the frame's Swap (one GPU wait, once per target) "
+                    "instead of one synchronous read-back per resolve");
 REXCVAR_DEFINE_BOOL(svr_rebuild_target_mips, true, "SvR",
                     "Rebuild the smaller mip levels of GPU-painted textures (wrestler skins: eyes, "
                     "teeth, blood) from their first level after each update.");
@@ -595,6 +602,9 @@ struct DeferredReadback {
 };
 std::unordered_map<u32, DeferredReadback> g_deferred_readbacks;
 void ReadBackTarget(u32 texture_va, GuestTexture *dst);
+// svr_readback_batch: streak read-backs waiting for this frame's Swap (texture VA -> host target), under g_mutex.
+std::unordered_map<u32, GuestTexture *> g_batch_readbacks;
+std::atomic<u64> g_rb_immediate{0}, g_rb_batched_requests{0}, g_rb_batched_done{0}, g_rb_batches{0};
 void FinishReadBack(u32 texture_va, GuestTexture *dst, std::vector<u8> &pixels, u32 row_pitch);
 // svr_readback_async (resolve.cpp): rested targets whose GPU copy is in flight. Game thread only
 // (SvrProcessDeferredReadbacks).
@@ -748,8 +758,49 @@ void SvrAfterResolve(u32 texture_va, GuestTexture *dst, u32 level, u32 face) {
                 "rests", texture_va, dst->width, dst->height, st.frames);
       return;
     }
+    if (REXCVAR_GET(svr_readback_batch)) {
+      g_batch_readbacks[texture_va] = dst;
+      g_rb_batched_requests.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
   }
+  g_rb_immediate.fetch_add(1, std::memory_order_relaxed);
   ReadBackTarget(texture_va, dst);
+}
+
+// svr_readback_batch: this frame's streak read-backs, one GPU wait (Swap, before the deferred ones).
+static void SvrFlushBatchedReadbacks() {
+  std::vector<u32> vas;
+  std::vector<GuestTexture *> dsts;
+  {
+    std::lock_guard lock(g_mutex);
+    for (const auto &[va, dst] : g_batch_readbacks) {
+      const auto it = g_targets.find(va);
+      if (it != g_targets.end() && it->second.host == dst) {
+        vas.push_back(va);
+        dsts.push_back(dst);
+      }
+    }
+    g_batch_readbacks.clear();
+  }
+  if (!dsts.empty()) {
+    std::vector<std::vector<u8>> pixels;
+    std::vector<u32> pitches;
+    Video::ReadbackTextureLevel0Batch(dsts, pixels, pitches);
+    for (size_t i = 0; i < dsts.size(); ++i)
+      if (!pixels[i].empty())
+        FinishReadBack(vas[i], dsts[i], pixels[i], pitches[i]);
+    g_rb_batched_done.fetch_add(dsts.size(), std::memory_order_relaxed);
+    g_rb_batches.fetch_add(1, std::memory_order_relaxed);
+  }
+  using Clock = std::chrono::steady_clock;
+  static Clock::time_point s_last = Clock::now();
+  if (Clock::now() - s_last >= std::chrono::seconds(10)) {
+    s_last = Clock::now();
+    BD_INFO("[readback] 10 s: immediate {} | batched requests {} done {} in {} waits (svr_readback_batch {})",
+            g_rb_immediate.exchange(0), g_rb_batched_requests.exchange(0), g_rb_batched_done.exchange(0),
+            g_rb_batches.exchange(0), REXCVAR_GET(svr_readback_batch));
+  }
 }
 
 // Called once per frame (game thread, no lock held): read back the bursts that have settled.
@@ -1512,6 +1563,7 @@ void SvrOnFrame() {
   ::svr::HookProfileTick(frame);
   ::svr::GuestProbeTick(frame);
   g_frame_index.store(frame, std::memory_order_relaxed);
+  SvrFlushBatchedReadbacks();
   SvrProcessDeferredReadbacks(frame);
   g_surface_frame.store(frame, std::memory_order_relaxed);
   ReleaseIdleSurfaces(frame);

@@ -741,6 +741,76 @@ bool Video::ReadbackTextureLevel(GuestTexture *src, u32 level, u32 face,
   return true;
 }
 
+void Video::ReadbackTextureLevel0Batch(const std::vector<GuestTexture *> &src,
+                                       std::vector<std::vector<u8>> &out, std::vector<u32> &pitches) {
+  out.assign(src.size(), {});
+  pitches.assign(src.size(), 0);
+  auto &s = state();
+  std::lock_guard lock(s.mutex);
+  if (!s.ready)
+    return;
+  std::vector<std::unique_ptr<plume::RenderBuffer>> buffers(src.size());
+  std::vector<u32> heights(src.size(), 0);
+  bool any = false;
+  for (size_t i = 0; i < src.size(); ++i) {
+    GuestTexture *t = src[i];
+    if (!t || !t->texture || t->sampleCount != plume::RenderSampleCount::COUNT_1)
+      continue;
+    const u32 w = std::max(1u, t->width), h = std::max(1u, t->height);
+    const u32 row_pitch = rex::align(w * 4u, 256u);
+    buffers[i] = CreateHostBuffer(s.device.get(),
+                                  plume::RenderBufferDesc::ReadbackBuffer(u64(row_pitch) * h),
+                                  "resolve-readback-batch");
+    if (!buffers[i])
+      continue;
+    BeginCommandList(s);
+    if (!s.command_list_open)
+      return;
+    s.draw_framebuffer_bound = false;
+    plume::RenderTextureBarrier pre(t->texture, plume::RenderTextureLayout::COPY_SOURCE);
+    s.command_list->barriers(plume::RenderBarrierStage::COPY, &pre, 1);
+    t->layout = plume::RenderTextureLayout::COPY_SOURCE;
+    census::Mark(s, census::kResolveCopy);
+    s.command_list->copyTextureRegion(
+        plume::RenderTextureCopyLocation::PlacedFootprint(buffers[i].get(), t->format, w, h, 1,
+                                                          row_pitch / 4u),
+        plume::RenderTextureCopyLocation::Subresource(t->texture, 0, 0));
+    pitches[i] = row_pitch;
+    heights[i] = h;
+    any = true;
+  }
+  if (!any)
+    return;
+#if !defined(REBLUE_D3D12)
+  {  // as in ReadbackTextureLevel: transfer -> host visibility (issue #27 on AMD shared memory)
+    VkMemoryBarrier to_host{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    to_host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(static_cast<plume::VulkanCommandList *>(s.command_list)->vk,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1,
+                         &to_host, 0, nullptr, 0, nullptr);
+  }
+#endif
+  const u32 cur = s.frame.load(std::memory_order_relaxed);
+  SubmitOpenListLocked(s);
+  s.queue->waitForCommandFence(s.fences[cur].get());
+  s.command_list_submitted[cur] = false;
+  for (size_t i = 0; i < src.size(); ++i) {
+    if (!buffers[i])
+      continue;
+    const void *mapped = buffers[i]->map();
+    if (!mapped)
+      continue;
+#if !defined(REBLUE_D3D12)
+    auto *vk_buffer = static_cast<plume::VulkanBuffer *>(buffers[i].get());
+    vmaInvalidateAllocation(vk_buffer->device->allocator, vk_buffer->allocation, 0, VK_WHOLE_SIZE);
+#endif
+    out[i].assign(static_cast<const u8 *>(mapped),
+                  static_cast<const u8 *>(mapped) + size_t(pitches[i]) * heights[i]);
+    buffers[i]->unmap();
+  }
+}
+
 namespace {
 struct AsyncReadback {
   std::unique_ptr<plume::RenderBuffer> buffer;

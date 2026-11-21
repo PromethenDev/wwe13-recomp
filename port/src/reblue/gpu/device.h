@@ -205,6 +205,10 @@ public:
   // this frame's command list and returns a ticket (0 = not started); Poll returns true once the
   // copy is known done (this slot's fence awaited at its reuse, kNumFrames presents later) with
   // the texels in out, or with failed set.
+  // Several level-0 read-backs with ONE submit and GPU wait (svr_readback_batch): out[i] / pitches[i] per
+  // src[i]; an entry that could not be read is left empty.
+  static void ReadbackTextureLevel0Batch(const std::vector<GuestTexture *> &src,
+                                        std::vector<std::vector<u8>> &out, std::vector<u32> &pitches);
   static u64 ReadbackTextureLevelBegin(GuestTexture *src, u32 level, u32 face);
   static bool ReadbackTextureLevelPoll(u64 ticket, std::vector<u8> &out, u32 &row_pitch,
                                        bool &failed);
