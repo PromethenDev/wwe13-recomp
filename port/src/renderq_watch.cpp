@@ -302,7 +302,10 @@ extern "C" REX_FUNC(sub_82AA41A8) {
 // render_queue_guard.cpp, around each replay of the render queue.
 void Wwe13ReplayMark(bool begin) { g_replaying.store(begin, std::memory_order_relaxed); }
 
+void Wwe13SublistReplayEnter(uint8_t* base, uint32_t sub);  // renderq_sublist.cpp
+
 extern "C" REX_FUNC(sub_82AA3928) {
+  Wwe13SublistReplayEnter(base, ctx.r4.u32);
   // Remember a sub-list the replay is reading, for the watch thread to arm on (diagnostic only).
   if (REXCVAR_GET(wwe13_renderq_sublist_watch) && g_replaying.load(std::memory_order_relaxed))
     g_sub_target.store(ctx.r4.u32, std::memory_order_relaxed);

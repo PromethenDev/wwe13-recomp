@@ -150,7 +150,11 @@ bool SceneSerial(const uint8_t* base) {
 }
 }  // namespace
 
+void Wwe13SublistJobsStarted();  // renderq_sublist.cpp
+void Wwe13SublistLoop();
+
 extern "C" REX_FUNC(sub_82B24658) {
+  Wwe13SublistLoop();
   const bool scene_serial = SceneSerial(base);
   const bool serial_now = REXCVAR_GET(wwe13_renderq_serial_scene) ? scene_serial : SerialNow();
   if (REXCVAR_GET(wwe13_renderq_serial)) {
@@ -171,6 +175,7 @@ extern "C" REX_FUNC(sub_82B24658) {
     t_kick_arg = ctx.r3.u32;
     return;
   }
+  Wwe13SublistJobsStarted();
   __imp__sub_82B24658(ctx, base);
 }
 
@@ -218,14 +223,17 @@ void GuardedReplay(PPCContext& ctx, uint8_t* base);
 }
 
 void Wwe13ReplayMark(bool begin);  // renderq_watch.cpp (diagnostics)
+void Wwe13SublistReplay(bool begin, uint8_t* base);  // renderq_sublist.cpp
 
 extern "C" REX_FUNC(sub_82AA5458) {
   Wwe13ReplayMark(true);
+  Wwe13SublistReplay(true, base);
   if (!REXCVAR_GET(wwe13_renderq_guard))
     __imp__sub_82AA5458(ctx, base);
   else
     GuardedReplay(ctx, base);
   Wwe13ReplayMark(false);
+  Wwe13SublistReplay(false, base);
   RunDeferredKick(ctx, base);
 }
 

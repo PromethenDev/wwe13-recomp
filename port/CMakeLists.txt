@@ -23,6 +23,7 @@ set(WWE13_GAME_SOURCES
     src/pin_kickout.cpp
     src/d3d_ring_lock.cpp
     src/renderq_watch.cpp
+    src/renderq_sublist.cpp
 )
 set(WWE13_SOURCES
     src/main.cpp
