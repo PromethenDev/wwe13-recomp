@@ -36,7 +36,7 @@
 // Full same-size, same-format resolves (Video::ResolveRegion) become the same deferred source link as
 // ResolveRtToTexture's lazy alias: the texture samples the render target until the target is written
 // again, when MaterializeOutboundLocked copies the snapshot. Off by default (picture check pending).
-REXCVAR_DEFINE_BOOL(svr_readback_async, false, "SvR",
+REXCVAR_DEFINE_BOOL(svr_readback_async, true, "SvR",
                     "Read-backs of targets that rested (SvrProcessDeferredReadbacks) and the mip "
                     "rebuild uploads after them without a GPU wait: the copy finishes kNumFrames "
                     "presents later (WWE '13: a 25 ms stall every 301 frames in matches)");

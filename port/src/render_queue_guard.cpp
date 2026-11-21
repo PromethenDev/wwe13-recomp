@@ -64,7 +64,7 @@ REXCVAR_DEFINE_BOOL(wwe13_renderq_serial_auto, false, "WWE13",
 // With wwe13_renderq_serial_scene the ordering is kept whenever that rate is not 60 and for the
 // first 120 render loops after it returns to 60; a steady 60 fps scene (match, menus) gets the
 // game's overlap back. Not init-only so the live in-run A/B can switch it. Off by default.
-REXCVAR_DEFINE_BOOL(wwe13_renderq_serial_scene, false, "WWE13",
+REXCVAR_DEFINE_BOOL(wwe13_renderq_serial_scene, true, "WWE13",
                     "With wwe13_renderq_serial: order the job threads only while the game's own frame "
                     "rate is not 60 (entrances, cut scenes), keep the game's overlap in 60 fps scenes");
 
