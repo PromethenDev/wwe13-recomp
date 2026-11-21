@@ -201,6 +201,13 @@ public:
   // row), waiting for the GPU. For resolves whose memory the game reads with the CPU.
   static bool ReadbackTextureLevel(GuestTexture *src, u32 level, u32 face, std::vector<u8> &out,
                                    u32 &row_pitch);
+  // The same read-back without the GPU wait (svr_readback_async): Begin records the copy into
+  // this frame's command list and returns a ticket (0 = not started); Poll returns true once the
+  // copy is known done (this slot's fence awaited at its reuse, kNumFrames presents later) with
+  // the texels in out, or with failed set.
+  static u64 ReadbackTextureLevelBegin(GuestTexture *src, u32 level, u32 face);
+  static bool ReadbackTextureLevelPoll(u64 ticket, std::vector<u8> &out, u32 &row_pitch,
+                                       bool &failed);
   // Uploads RGBA8 texels (row_pitch a multiple of 256) into one level of a 4-byte texture.
   static bool UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32 row_pitch,
                                  u32 face = 0);
@@ -499,6 +506,10 @@ struct VideoState {
   // block-shared buffers use their own graveyard.
   std::vector<std::unique_ptr<plume::RenderBuffer>>
       buffer_graveyard[kNumFrames];
+
+  // AdvanceAndWaitReused calls so far: work recorded while this read K is done once it reads
+  // K + kNumFrames (the slot it was recorded in has been awaited). Render thread, under mutex.
+  u64 frames_advanced = 0;
 
   std::vector<std::unique_ptr<plume::RenderTexture>> texture_free_backlog;
 

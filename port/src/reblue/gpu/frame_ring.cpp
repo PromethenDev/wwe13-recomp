@@ -238,6 +238,7 @@ void AdvanceAndWaitReused(VideoState &s) {
     }
 #endif
   }
+  ++s.frames_advanced;
   ResetFrame(slot);
 }
 

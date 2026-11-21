@@ -17,6 +17,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 #include <plume_render_interface.h>
@@ -35,6 +36,10 @@
 // Full same-size, same-format resolves (Video::ResolveRegion) become the same deferred source link as
 // ResolveRtToTexture's lazy alias: the texture samples the render target until the target is written
 // again, when MaterializeOutboundLocked copies the snapshot. Off by default (picture check pending).
+REXCVAR_DEFINE_BOOL(svr_readback_async, false, "SvR",
+                    "Read-backs of targets that rested (SvrProcessDeferredReadbacks) and the mip "
+                    "rebuild uploads after them without a GPU wait: the copy finishes kNumFrames "
+                    "presents later (WWE '13: a 25 ms stall every 301 frames in matches)");
 REXCVAR_DEFINE_BOOL(wwe13_resolve_alias, false, "WWE13",
                     "Avoid full same-size, same-format single-sample resolves by aliasing the render target until its next write.")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
@@ -736,6 +741,94 @@ bool Video::ReadbackTextureLevel(GuestTexture *src, u32 level, u32 face,
   return true;
 }
 
+namespace {
+struct AsyncReadback {
+  std::unique_ptr<plume::RenderBuffer> buffer;
+  u64 done_at = 0;  // frames_advanced value from which the copy is complete
+  u32 row_pitch = 0, height = 0;
+};
+std::unordered_map<u64, AsyncReadback> g_async_readbacks;  // under state().mutex
+u64 g_async_next = 1;
+}  // namespace
+
+u64 Video::ReadbackTextureLevelBegin(GuestTexture *src, u32 level, u32 face) {
+  if (!src || !src->texture || level >= src->mipLevels ||
+      src->sampleCount != plume::RenderSampleCount::COUNT_1)
+    return 0;
+  const u32 w = std::max(1u, src->width >> level);
+  const u32 h = std::max(1u, src->height >> level);
+  const u32 row_pitch = rex::align(w * 4u, 256u);
+  auto &s = state();
+  std::lock_guard lock(s.mutex);
+  if (!s.ready)
+    return 0;
+  auto buffer = CreateHostBuffer(s.device.get(),
+                                 plume::RenderBufferDesc::ReadbackBuffer(u64(row_pitch) * h),
+                                 "resolve-readback-async");
+  if (!buffer)
+    return 0;
+  BeginCommandList(s);
+  if (!s.command_list_open)
+    return 0;
+  s.draw_framebuffer_bound = false;
+  plume::RenderTextureBarrier pre(src->texture, plume::RenderTextureLayout::COPY_SOURCE);
+  s.command_list->barriers(plume::RenderBarrierStage::COPY, &pre, 1);
+  src->layout = plume::RenderTextureLayout::COPY_SOURCE;
+  census::Mark(s, census::kResolveCopy);
+  s.command_list->copyTextureRegion(
+      plume::RenderTextureCopyLocation::PlacedFootprint(buffer.get(), src->format, w, h, 1,
+                                                        row_pitch / 4u),
+      plume::RenderTextureCopyLocation::Subresource(src->texture, level, face));
+#if !defined(REBLUE_D3D12)
+  {  // as in ReadbackTextureLevel (issue #27: stale bytes on AMD integrated GPUs without it)
+    VkMemoryBarrier to_host{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+    to_host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(static_cast<plume::VulkanCommandList *>(s.command_list)->vk,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1,
+                         &to_host, 0, nullptr, 0, nullptr);
+  }
+#endif
+  // Recorded into the open list of slot frame(); that slot is awaited when it is reused, i.e.
+  // after kNumFrames more AdvanceAndWaitReused calls. No submit, no wait here.
+  const u64 ticket = g_async_next++;
+  g_async_readbacks[ticket] =
+      AsyncReadback{std::move(buffer), s.frames_advanced + kNumFrames, row_pitch, h};
+  return ticket;
+}
+
+bool Video::ReadbackTextureLevelPoll(u64 ticket, std::vector<u8> &out, u32 &row_pitch,
+                                     bool &failed) {
+  failed = false;
+  auto &s = state();
+  std::lock_guard lock(s.mutex);
+  const auto it = g_async_readbacks.find(ticket);
+  if (it == g_async_readbacks.end()) {
+    failed = true;
+    return true;
+  }
+  if (s.frames_advanced < it->second.done_at)
+    return false;
+  AsyncReadback r = std::move(it->second);
+  g_async_readbacks.erase(it);
+  const void *mapped = r.buffer->map();
+  if (!mapped) {
+    failed = true;
+    return true;
+  }
+#if !defined(REBLUE_D3D12)
+  {
+    auto *vk_buffer = static_cast<plume::VulkanBuffer *>(r.buffer.get());
+    vmaInvalidateAllocation(vk_buffer->device->allocator, vk_buffer->allocation, 0, VK_WHOLE_SIZE);
+  }
+#endif
+  row_pitch = r.row_pitch;
+  out.assign(static_cast<const u8 *>(mapped),
+             static_cast<const u8 *>(mapped) + size_t(r.row_pitch) * r.height);
+  r.buffer->unmap();
+  return true;
+}
+
 bool Video::UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32 row_pitch,
                                u32 face) {
   if (!dst || !dst->texture || !rgba || level >= dst->mipLevels || (row_pitch & 255u))
@@ -770,6 +863,12 @@ bool Video::UploadTextureLevel(GuestTexture *dst, u32 level, const u8 *rgba, u32
       plume::RenderTextureCopyLocation::Subresource(dst->texture, level, face),
       plume::RenderTextureCopyLocation::PlacedFootprint(buffer.get(), dst->format, w, h, 1,
                                                         row_pitch / 4u));
+  if (REXCVAR_GET(svr_readback_async)) {
+    // The copy stays in this frame's list; the staging buffer is freed once this slot's fence
+    // is awaited at its reuse (DrainSlot), so no GPU wait here.
+    s.buffer_graveyard[Video::RetireSlot("level-upload")].push_back(std::move(buffer));
+    return true;
+  }
   // The staging buffer dies with this call: let the copy finish first.
   const u32 cur = s.frame.load(std::memory_order_relaxed);
   SubmitOpenListLocked(s);

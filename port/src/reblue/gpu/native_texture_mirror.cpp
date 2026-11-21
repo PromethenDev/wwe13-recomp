@@ -31,6 +31,7 @@
 #include "core/memory_helpers.h"
 #include "gpu/d3d.h"
 #include "gpu/device.h"
+#include "gpu/guest_texel_write.h"
 #include "gpu/host_resource_heap.h"
 #include "gpu/texture_upload.h"
 #if defined(SVR_NATIVE_RENDERER)
@@ -1091,10 +1092,14 @@ bool WriteGuestTextureBase(u32 guest_va, const u8 *rgba, u32 row_pitch, u32 widt
         texel[2] = t[0];
         texel[3] = t[3];
       }
-      const i32 offset = BaseBlockOffset(L, i32(x), i32(y));
+      // Inline tiling and swap (guest_texel_write.h): same bytes, no DLL calls per texel.
+      const i32 offset =
+          L.tiled ? texel_write::TiledOffset2D(i32(x), i32(y), L.aligned_w, L.bpb_log2)
+                  : i32(y) * i32(L.linear_row_pitch) + i32(x) * i32(L.bytes_per_block);
       if (offset < 0 || u32(offset) + L.bytes_per_block > L.source_bytes)
         continue;
-      tc::CopySwapBlock(L.endian, dst + offset, texel, L.bytes_per_block);
+      if (!texel_write::CopySwapSmall(u32(L.endian), dst + offset, texel, L.bytes_per_block))
+        tc::CopySwapBlock(L.endian, dst + offset, texel, L.bytes_per_block);
     }
   }
   return true;

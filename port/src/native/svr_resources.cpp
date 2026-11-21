@@ -101,6 +101,7 @@ extern const WWE12ShaderKey g_wwe12_shader_keys[];
 extern const size_t g_wwe12_shader_key_count;
 #endif
 
+REXCVAR_DECLARE(bool, svr_readback_async);  // resolve.cpp
 namespace bd::gpu {
 
 // Host-side creation from re:Blue's CreateTexture/CreateSurface hooks (gpu/hooks/resource.cpp).
@@ -123,6 +124,7 @@ struct HostTarget {
   u64 last_used = 0; // frame it was last drawn to, resolved into or sampled
   bool in_memory = false;  // texture: its last resolve was read back into the game's memory
   u64 created = 0;  // frame the host resource was made in
+  u64 resolves = 0;  // texture: resolves into it so far (an async read-back must still be the last)
 };
 std::unordered_map<u32, HostTarget> g_surfaces;  // D3DSurface VA -> host render target
 std::unordered_map<u32, HostTarget> g_targets;   // texture VA -> GPU-written host texture
@@ -593,6 +595,18 @@ struct DeferredReadback {
 };
 std::unordered_map<u32, DeferredReadback> g_deferred_readbacks;
 void ReadBackTarget(u32 texture_va, GuestTexture *dst);
+void FinishReadBack(u32 texture_va, GuestTexture *dst, std::vector<u8> &pixels, u32 row_pitch);
+// svr_readback_async (resolve.cpp): rested targets whose GPU copy is in flight. Game thread only
+// (SvrProcessDeferredReadbacks).
+struct AsyncReadbackJob {
+  u32 texture_va = 0;
+  GuestTexture *dst = nullptr;
+  u64 ticket = 0;
+  u64 resolves = 0;  // HostTarget::resolves when the copy was recorded
+  u64 created = 0;   // HostTarget::created (a new host texture at the same address is not it)
+  u32 desc[2] = {};
+};
+std::vector<AsyncReadbackJob> g_async_jobs;
 }  // namespace
 
 void SvrAfterResolve(u32 texture_va, GuestTexture *dst, u32 level, u32 face) {
@@ -601,8 +615,10 @@ void SvrAfterResolve(u32 texture_va, GuestTexture *dst, u32 level, u32 face) {
   {
     // New content on the GPU only, until a read back below copies it to the game's memory.
     std::lock_guard lock(g_mutex);
-    if (const auto it = g_targets.find(texture_va); it != g_targets.end() && it->second.host == dst)
+    if (const auto it = g_targets.find(texture_va); it != g_targets.end() && it->second.host == dst) {
       it->second.in_memory = false;
+      ++it->second.resolves;
+    }
   }
   if (REXCVAR_GET(svr_log_readbacks)) {
     // First resolve of each burst only (a target resting for a second before it), so the
@@ -763,8 +779,64 @@ static void SvrProcessDeferredReadbacks(u64 frame) {
       it = g_deferred_readbacks.erase(it);
     }
   }
-  for (const auto &[texture_va, dst] : ready)
-    ReadBackTarget(texture_va, dst);
+  if (!REXCVAR_GET(svr_readback_async) && g_async_jobs.empty()) {
+    for (const auto &[texture_va, dst] : ready)
+      ReadBackTarget(texture_va, dst);
+    return;
+  }
+  // Async: finish the copies the GPU has completed (still the target's last resolve, same host
+  // texture and header), then start this frame's ones.
+  for (size_t i = 0; i < g_async_jobs.size();) {
+    AsyncReadbackJob &job = g_async_jobs[i];
+    std::vector<u8> pixels;
+    u32 row_pitch = 0;
+    bool failed = false;
+    if (!Video::ReadbackTextureLevelPoll(job.ticket, pixels, row_pitch, failed)) {
+      ++i;
+      continue;
+    }
+    bool current = false;
+    {
+      std::lock_guard lock(g_mutex);
+      const auto t = g_targets.find(job.texture_va);
+      rex::graphics::xenos::xe_gpu_texture_fetch_t fetch{};
+      current = !failed && t != g_targets.end() && t->second.host == job.dst &&
+                t->second.resolves == job.resolves && t->second.created == job.created &&
+                ReadFetch(job.texture_va, fetch) &&
+                fetch.dword_1 == job.desc[0] && fetch.dword_2 == job.desc[1];
+    }
+    if (current)
+      FinishReadBack(job.texture_va, job.dst, pixels, row_pitch);
+    else if (REXCVAR_GET(svr_log_readbacks))
+      BD_INFO("SvR target 0x{:08X}: async read-back dropped ({})", job.texture_va,
+              failed ? "failed" : "resolved again or header changed");
+    g_async_jobs[i] = g_async_jobs.back();
+    g_async_jobs.pop_back();
+  }
+  for (const auto &[texture_va, dst] : ready) {
+    if (!REXCVAR_GET(svr_readback_async)) {
+      ReadBackTarget(texture_va, dst);
+      continue;
+    }
+    // A job still in flight for this target is older (a rest needs a new resolve): it is dropped
+    // when it lands (resolve count differs), this one carries the newer content.
+    AsyncReadbackJob job{texture_va, dst, 0, 0, 0, {}};
+    {
+      std::lock_guard lock(g_mutex);
+      const auto t = g_targets.find(texture_va);
+      rex::graphics::xenos::xe_gpu_texture_fetch_t fetch{};
+      if (t == g_targets.end() || t->second.host != dst || !ReadFetch(texture_va, fetch))
+        continue;
+      job.resolves = t->second.resolves;
+      job.created = t->second.created;
+      job.desc[0] = fetch.dword_1, job.desc[1] = fetch.dword_2;
+    }
+    job.ticket = Video::ReadbackTextureLevelBegin(dst, 0, 0);
+    if (job.ticket)
+      g_async_jobs.push_back(job);
+    else
+      ReadBackTarget(texture_va, dst);
+  }
 }
 
 namespace {
@@ -773,6 +845,11 @@ void ReadBackTarget(u32 texture_va, GuestTexture *dst) {
   u32 row_pitch = 0;
   if (!Video::ReadbackTextureLevel(dst, 0, 0, pixels, row_pitch))
     return;
+  FinishReadBack(texture_va, dst, pixels, row_pitch);
+}
+
+// The read-back texels of dst's level 0 into the game's memory, then its smaller levels rebuilt.
+void FinishReadBack(u32 texture_va, GuestTexture *dst, std::vector<u8> &pixels, u32 row_pitch) {
   if (REXCVAR_GET(svr_dump_readbacks) && (dst->width >= 1024 || dst->height >= 1024)) {
     static std::atomic<u32> s_dumps{0};
     static std::mutex s_dump_mutex;
