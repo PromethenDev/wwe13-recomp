@@ -25,6 +25,8 @@ A joint release with iMrBurn's WWE '13 fork: his native renderers come to the ma
 - Built on the newer ReXGlue SDK 0.10.
 
 ## Fixed
+- **Green patches in entrances.** Small reflection maps the game uses during entrances were refused by
+  the native renderers and drawn as a green placeholder; they now load like other textures.
 - **Entrance crash with the native renderer.** A crash during some entrances is avoided: the game's
   worker threads wait only when they would reuse memory the renderer is still reading.
 - **Matches held below 60 fps.** The game paused about 10 ms every frame inside a leftover Xbox-emulator

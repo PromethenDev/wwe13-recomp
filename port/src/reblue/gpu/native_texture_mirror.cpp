@@ -708,9 +708,12 @@ GuestTexture *GetOrCreateNativeMirror(u32 guest_va, u32 name_va) {
                     fetch.format == xe::TextureFormat::k_DXT2_3 ||
                     fetch.format == xe::TextureFormat::k_DXT4_5);
   // Uncompressed k_8_8_8_8 (color ramps / UI atlases BD stores raw, e.g. the
-  // cloud sky LUT dg03_cbr01). 2D only: cube/volume assume DXT blocks.
+  // cloud sky LUT dg03_cbr01). 2D, and cubes: WWE '13 binds 64x64 tiled k_8_8_8_8 cubes at
+  // fetch slot 11 in entrances (11-21: they fell back to the green marker). The cube path gathers
+  // per block, so 4-byte blocks need nothing else. Volumes still assume DXT blocks.
   const bool rgba8 = fetch.format == xe::TextureFormat::k_8_8_8_8 &&
-                     fetch.dimension <= xe::DataDimension::k2DOrStacked;
+                     (fetch.dimension <= xe::DataDimension::k2DOrStacked ||
+                      fetch.dimension == xe::DataDimension::kCube);
 #if defined(SVR_NATIVE_RENDERER)
   // SvR also samples single-channel k_8 (the Bink Y/cR/cB planes), k_8_8, 16-bit and float
   // formats (lookup tables) and 16-bit packed colour (icons, expanded to RGBA8), 2D only.
@@ -791,6 +794,23 @@ GuestTexture *GetOrCreateNativeMirror(u32 guest_va, u32 name_va) {
     break;
   case xe::DataDimension::kCube:
     tex = BuildCubeMirror(layout, src, guest_va);
+#if defined(SVR_NATIVE_RENDERER)
+    // Diagnostic (11-21): whether an uncompressed cube holds data in guest memory when it is
+    // first built, or is all zero (then the game fills it some other way, e.g. a GPU resolve).
+    if (tex && fetch.format == xe::TextureFormat::k_8_8_8_8) {
+      static std::atomic<u32> s_cube_logged{0};
+      if (s_cube_logged.fetch_add(1) < 24) {
+        const size_t n = std::min<size_t>(size_t(layout.face_stride) * 6u, 1u << 20);
+        size_t nonzero = 0;
+        for (size_t i = 0; i < n; ++i)
+          nonzero += src[i] != 0;
+        BD_INFO("native texture va=0x{:08X}: rgba8 cube {}x{} tiled {} swizzle 0x{:03X}, {} of {} "
+                "bytes non-zero",
+                guest_va, layout.width, layout.height, u32(fetch.tiled), u32(fetch.swizzle),
+                nonzero, n);
+      }
+    }
+#endif
     break;
   default:
     tex = Build2DMirror(layout, src, fetch, guest_va, name_va, dxt);
