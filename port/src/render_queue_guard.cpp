@@ -153,7 +153,14 @@ bool SceneSerial(const uint8_t* base) {
 void Wwe13SublistJobsStarted();  // renderq_sublist.cpp
 void Wwe13SublistLoop();
 
+#if defined(SVR_NATIVE_RENDERER)
+void Wwe13TimelineMark(int mark, uint8_t* base);  // native/renderq_timeline.cpp (0 kick, 1 / 2 replay begin / end)
+#else
+inline void Wwe13TimelineMark(int, uint8_t*) {}
+#endif
+
 extern "C" REX_FUNC(sub_82B24658) {
+  Wwe13TimelineMark(0, base);
   Wwe13SublistLoop();
   const bool scene_serial = SceneSerial(base);
   const bool serial_now = REXCVAR_GET(wwe13_renderq_serial_scene) ? scene_serial : SerialNow();
@@ -226,6 +233,7 @@ void Wwe13ReplayMark(bool begin);  // renderq_watch.cpp (diagnostics)
 void Wwe13SublistReplay(bool begin, uint8_t* base);  // renderq_sublist.cpp
 
 extern "C" REX_FUNC(sub_82AA5458) {
+  Wwe13TimelineMark(1, base);
   Wwe13ReplayMark(true);
   Wwe13SublistReplay(true, base);
   if (!REXCVAR_GET(wwe13_renderq_guard))
@@ -234,6 +242,7 @@ extern "C" REX_FUNC(sub_82AA5458) {
     GuardedReplay(ctx, base);
   Wwe13ReplayMark(false);
   Wwe13SublistReplay(false, base);
+  Wwe13TimelineMark(2, base);
   RunDeferredKick(ctx, base);
 }
 

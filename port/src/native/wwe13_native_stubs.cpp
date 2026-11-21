@@ -69,6 +69,7 @@ HookProf* RegisterHookProf(const char* name) {
   }
   return p;
 }
+HookProf* HookProfList() { return g_hook_profs.load(std::memory_order_relaxed); }
 void HookProfileTick(uint64_t frame) {
   const bool on = REXCVAR_GET(wwe13_hook_profile);
   static uint64_t frames = 0;

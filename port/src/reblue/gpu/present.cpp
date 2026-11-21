@@ -425,6 +425,7 @@ void Wwe12PerfHintReport(double work_ms);  // android/wwe12_perf_hint.cpp
 namespace bd::gpu {
 #endif
 
+std::atomic<u64> g_present_wait_ns{0};  // all present waits so far (renderq_timeline.cpp)
 void FrameStatsPresented(double gpu_wait_ms, double swap_ms) {
   auto &fs = g_frame_stats;
   const auto now = FrameStats::Clock::now();
@@ -622,6 +623,7 @@ void Video::Present(GuestTexture *frontBuffer) {
     swap_ms += MsSince(pace_start);
   }
   g_frame_stats.wait_ms += gpu_wait_ms + swap_ms;
+  g_present_wait_ns.fetch_add(u64((gpu_wait_ms + swap_ms) * 1e6), std::memory_order_relaxed);
   FrameStatsPresented(gpu_wait_ms, swap_ms);
 }
 
