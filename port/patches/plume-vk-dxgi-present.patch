@@ -1,5 +1,5 @@
 # Vulkan presented through a DXGI flip-model swap chain (wwe13_vk_dxgi_present). Apply in native-deps/plume with patch -p1
-# on top of the other plume patches. Verified 2026-11-20 UHD 630 runs dx1/dx2b/dx3.
+# on top of the other plume patches. Verified 2026-11-20 UHD 630 runs dx1/dx2b/dx3, kitchk2 (startup probe).
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -104,6 +104,8 @@
@@ -83,7 +83,7 @@
  target_include_directories(plume PUBLIC
 --- a/plume_vulkan_dxgi.cpp
 +++ b/plume_vulkan_dxgi.cpp
-@@ -0,0 +1,531 @@
+@@ -0,0 +1,548 @@
 +// Vulkan rendering presented through a DXGI flip-model swap chain (Windows, opt-in: VulkanDxgiPresent).
 +//
 +// Why: Intel's UHD 630 Vulkan driver presents a full-screen window by a copy through the desktop compositor
@@ -218,6 +218,23 @@
 +        if (vkCreateCommandPool(device->vk, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
 +            fprintf(stderr, "[plume-dxgi] vkCreateCommandPool failed\n");
 +            return false;
++        }
++        // Probe the whole sharing path once (D3D11 shared texture -> Vulkan import -> keyed mutex): a driver that
++        // cannot do it must fail here, where the caller still falls back to the Vulkan swap chain.
++        {
++            width = 64;
++            height = 64;
++            Image probe;
++            images.clear();
++            const bool ok = createImage(probe);
++            images.push_back(std::move(probe));
++            releaseImages();
++            width = 0;
++            height = 0;
++            if (!ok) {
++                fprintf(stderr, "[plume-dxgi] shared-texture probe failed on this driver\n");
++                return false;
++            }
 +        }
 +        presentThread = std::thread([this] { presentLoop(); });
 +        DXGI_ADAPTER_DESC1 adesc = {};
