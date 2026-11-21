@@ -12,16 +12,21 @@ A joint release with iMrBurn's WWE '13 fork: his native renderers come to the ma
     renderer only.
   - **Emulated (Xenos)** - the renderer of v1.5 and earlier.
 
-  The native renderers are much faster on weak graphics: on an Intel UHD 630 at 720p the attract-mode
-  matches run at about 49 frames per second with Vulkan or DirectX 12 and about 42-46 with DirectX 11,
-  with very few slow frames. They are marked **experimental** because they are new: some scenes may
+  The native renderers are much faster on weak graphics: on an Intel UHD 630 at 720p, matches run at
+  60 frames per second with Vulkan or DirectX 12 and about 55 with DirectX 11. They are marked **experimental** because they are new: some scenes may
   still look wrong or crash. If that happens, choose **Emulated (Xenos)** and please report it.
+- **Performance presets.** The launcher's **Settings** page has a **Performance preset** row that sets
+  resolution and frame rate in one click: **Steady 30** (720p, 30 everywhere), **Light** (540p),
+  **Balanced** (720p), **Sharp** (1080p) and **Best** (1440p). **30 Locked** and **60 Everywhere** now
+  work with the native renderers too.
 - **QUIT in the main menu.** The main menu's shop entry is now **QUIT** and closes the game.
 - Built on the newer ReXGlue SDK 0.10.
 
 ## Fixed
-- **Entrance crash with the native renderer.** A crash during some entrances is avoided by finishing
-  the game's draw commands in order before its worker threads continue.
+- **Entrance crash with the native renderer.** A crash during some entrances is avoided: the game's
+  worker threads wait only when they would reuse memory the renderer is still reading.
+- **Matches held below 60 fps.** The game paused about 10 ms every frame inside a leftover Xbox-emulator
+  workaround (music-player check); that pause is gone, so slower PCs reach 60 in matches.
 - **DirectX 12 on PCs with two graphics cards.** DirectX 12 now uses the graphics card chosen in the
   launcher. Before, on a PC with two cards from the same maker (for example Intel integrated graphics
   plus an Intel Arc card), it could pick the other one.
