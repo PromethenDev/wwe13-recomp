@@ -521,6 +521,12 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
       BD_ERROR("Plume createSwapChain failed");
       return false;
     }
+#if !defined(REBLUE_D3D11) && !defined(REBLUE_D3D12) && defined(_WIN32)
+    // Which present path ran (plume's own [plume-dxgi] lines go to stderr only).
+    BD_INFO("[present] Vulkan frames go through {}",
+            plume::VulkanDxgiPresentActive ? "a DXGI flip swap chain (wwe13_vk_dxgi_present)"
+                                           : "the Vulkan swap chain");
+#endif
 #if defined(__ANDROID__)
     NoteSwapChainWindow(render_window);
 #endif
