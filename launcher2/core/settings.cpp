@@ -416,4 +416,38 @@ Result SaveSettings(const Paths& paths, const Settings& settings) {
   }
 }
 
+
+// Measured on the media server (Intel UHD 630, Arc A380), WWE '13 native renderers; see docs/PERF-PRESETS.md.
+const std::vector<PerformancePreset>& PerformancePresets() {
+  static const std::vector<PerformancePreset> presets = {
+      {"Steady 30", "30 fps everywhere", "Weakest PCs and laptops on battery: a steady 30 instead of an uneven 60",
+       Resolution::k720p, FrameRate::kLock30},
+      {"Light", "60 fps at 540p", "Weak integrated graphics (older Intel laptops)", Resolution::k576p,
+       FrameRate::kClassic},
+      {"Balanced", "60 fps at 720p", "Integrated graphics such as Intel UHD 630 or AMD Radeon 780M",
+       Resolution::k720p, FrameRate::kClassic},
+      {"Sharp", "60 fps at 1080p", "Entry graphics cards (Intel Arc A380, GTX 1650 class)", Resolution::k1080p,
+       FrameRate::kClassic},
+      {"Best", "60 fps at 1440p", "Mid-range graphics cards and up", Resolution::k1440p, FrameRate::kClassic},
+  };
+  return presets;
+}
+
+int MatchingPerformancePreset(const Settings& settings) {
+  const auto& presets = PerformancePresets();
+  for (size_t i = 0; i < presets.size(); ++i) {
+    if (presets[i].resolution == settings.resolution && presets[i].frame_rate == settings.frame_rate)
+      return static_cast<int>(i);
+  }
+  return -1;
+}
+
+void ApplyPerformancePreset(Settings& settings, int index) {
+  const auto& presets = PerformancePresets();
+  if (index < 0 || static_cast<size_t>(index) >= presets.size()) return;
+  settings.resolution = presets[index].resolution;
+  settings.frame_rate = presets[index].frame_rate;
+  settings.explicit_choice = true;
+}
+
 }  // namespace wwe13::launcher

@@ -2192,6 +2192,35 @@ void DrawSettings(AppState& app) {
   const float available_width = ImGui::GetContentRegionAvail().x;
   const float gap = ImGui::GetStyle().ItemSpacing.x;
   const float card_width = (available_width - gap) * 0.5f;
+  // Performance presets (owner 2026-11-21, SDK 0.10 build): one click sets resolution + frame rate for an fps target.
+  if (g_port_build) {
+    if (BeginPanel(app, "settings-presets", ImVec2(available_width, S(app, compact ? 136.0f : 148.0f)))) {
+      DrawPanelHeading(app, "PERFORMANCE PRESET", "Pick the frame rate your PC should hold; it sets resolution and frame rate.");
+      ImGui::Spacing();
+      const auto& presets = PerformancePresets();
+      const int chosen = MatchingPerformancePreset(current);
+      const float segment_width =
+          (ImGui::GetContentRegionAvail().x - static_cast<float>(presets.size() - 1) * ImGui::GetStyle().ItemSpacing.x) /
+          static_cast<float>(presets.size());
+      for (size_t i = 0; i < presets.size(); ++i) {
+        if (i) ImGui::SameLine();
+        DrawSegment(app, presets[i].name, chosen == static_cast<int>(i), segment_width, [&app, i] {
+          KeepManualSettings(app);
+          ApplyPerformancePreset(app.settings, static_cast<int>(i));
+          SaveSettings(app);
+        });
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s - %s", presets[i].target, presets[i].hint);
+      }
+      if (chosen >= 0) {
+        const std::string line = std::string(presets[chosen].target) + " - " + presets[chosen].hint;
+        DrawTextDisabled(app, line.c_str());
+      } else {
+        DrawTextDisabled(app, "Custom: your own resolution and frame rate below");
+      }
+    }
+    EndPanel();
+    ImGui::Spacing();
+  }
   if (ImGui::BeginTable("settings-grid", 2, ImGuiTableFlags_SizingStretchSame)) {
     ImGui::TableNextColumn();
     if (BeginPanel(app, "settings-resolution", ImVec2(card_width, S(app, compact ? 166.0f : 186.0f)))) {

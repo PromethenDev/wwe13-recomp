@@ -76,6 +76,20 @@ struct Settings {
   std::string skipped_update_version;  // "Skip this version" choice ("" = none)
   bool explicit_choice = false;     // false = follow RecommendedSettings()
 };
+// Performance presets (owner 2026-11-21, SDK 0.10 build): one choice sets the resolution and frame rate for an fps
+// target on a class of graphics. A preset is not stored: it is shown as chosen while the settings match it.
+struct PerformancePreset {
+  const char* name;    // button label
+  const char* target;  // the frame rate it aims for, and where
+  const char* hint;    // the graphics it is for
+  Resolution resolution;
+  FrameRate frame_rate;
+};
+const std::vector<PerformancePreset>& PerformancePresets();
+// Index into PerformancePresets() whose resolution and frame rate the settings have, or -1.
+int MatchingPerformancePreset(const Settings& settings);
+// Sets the preset's resolution and frame rate and marks the settings as the player's own choice.
+void ApplyPerformancePreset(Settings& settings, int index);
 // Reads the existing wwe13-enhanced.ini (UTF-16LE with BOM written by the old launcher, or UTF-8) including
 // its schema-7 keys and legacy migrations; unknown keys are preserved on save.
 Settings LoadSettings(const Paths& paths);

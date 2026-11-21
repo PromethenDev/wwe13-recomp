@@ -7,6 +7,7 @@
 #include "internal/archive.h"
 #include "internal/util.h"
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -393,6 +394,45 @@ void TestGpus() {
   std::cout << "PASS Vulkan filtering/list and integrated/discrete recommendations (" << gpus.size() << " listed)\n";
 }
 
+
+// Performance presets (2026-11-21): matching, applying, and the SDK 0.10 launch arguments they produce.
+void TestPerformancePresets(const fs::path& root) {
+  const auto& presets = PerformancePresets();
+  assert(presets.size() == 5);
+  Settings settings;
+  for (size_t i = 0; i < presets.size(); ++i) {
+    ApplyPerformancePreset(settings, static_cast<int>(i));
+    assert(settings.explicit_choice);
+    assert(MatchingPerformancePreset(settings) == static_cast<int>(i));
+  }
+  ApplyPerformancePreset(settings, 99);  // out of range: unchanged
+  assert(MatchingPerformancePreset(settings) == static_cast<int>(presets.size() - 1));
+  settings.resolution = Resolution::k360p;
+  assert(MatchingPerformancePreset(settings) == -1);
+
+  Paths paths = MakePaths(root / "presets");
+  fs::create_directories(paths.exe_dir);
+  { std::ofstream(paths.exe_dir / "rexruntime.dll") << "x"; }
+  { std::ofstream(paths.exe_dir / "wwe13_d3d12.exe") << "x"; }
+  auto has = [](const LaunchPlan& plan, const std::string& arg) {
+    return std::find(plan.arguments.begin(), plan.arguments.end(), arg) != plan.arguments.end();
+  };
+  Settings s;
+  ApplyPerformancePreset(s, 0);  // Steady 30
+  LaunchPlan plan = BuildLaunchPlan(paths, s, {});
+  assert(plan.executable.filename() == "wwe13_d3d12.exe");
+  assert(has(plan, "--svr_render_scale=720") && has(plan, "--wwe13_lock_30=true") && !has(plan, "--wwe13_keep_60=true"));
+  ApplyPerformancePreset(s, 3);  // Sharp
+  plan = BuildLaunchPlan(paths, s, {});
+  assert(has(plan, "--svr_render_scale=1080") && !has(plan, "--wwe13_lock_30=true"));
+  s.frame_rate = FrameRate::kKeep60;
+  plan = BuildLaunchPlan(paths, s, {});
+  assert(has(plan, "--wwe13_keep_60=true") && MatchingPerformancePreset(s) == -1);
+  Settings automatic;  // no explicit choice: automatic resolution, the game's own frame rate
+  plan = BuildLaunchPlan(paths, automatic, {});
+  for (const auto& arg : plan.arguments) assert(arg.rfind("--svr_render_scale", 0) != 0 && arg.rfind("--wwe13_lock", 0) != 0);
+  std::cout << "PASS performance presets (match/apply, port launch arguments)\n";
+}
 }  // namespace
 
 std::string ReadAll(const fs::path& path) {
@@ -560,6 +600,7 @@ int main() {
   const fs::path data = WWE13_LAUNCHER_TESTDATA;
   TestSettings(root);
   TestLaunchPlan(root);
+  TestPerformancePresets(root);
   TestGameChecksAndSearch(root, data);
   TestBackups(root);
   TestMusic(root);

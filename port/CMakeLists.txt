@@ -24,6 +24,7 @@ set(WWE13_GAME_SOURCES
     src/d3d_ring_lock.cpp
     src/renderq_watch.cpp
     src/renderq_sublist.cpp
+    src/frame_rate_lock.cpp
     src/xmp_controller_fast.cpp
 )
 set(WWE13_SOURCES
