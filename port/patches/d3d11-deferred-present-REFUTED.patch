@@ -1,0 +1,120 @@
+# REFUTED 2026-11-21 (dp-d3d11, UHD 630, live A/B 600 s): D3D11 Present queued on the replay thread, render thread waits
+# only for the previous Present. Demo-match fps -0.10 +/- 1.06, median +0.56 ms: the replay thread's own work is the
+# D3D11 limit, not the wait. Reopen only with a replay-thread CPU profile showing idle time before Present.
+--- a/plume_d3d11.cpp
++++ b/plume_d3d11.cpp
+@@ -379,6 +379,7 @@
+     void (*D3D11LogFunction)(const char *message) = nullptr;
+     uint32_t D3D11FlushDrawLimit = 1000;
+     bool D3D11AsyncReplay = true;
++    bool D3D11DeferredPresent = false;
+ 
+     // D3D11Buffer
+ 
+@@ -1525,6 +1526,10 @@
+             static_cast<const D3D11CommandList *>(list)->replay();
+             draws += static_cast<const D3D11CommandList *>(list)->drawCount;
+         }
++        if (submission.present) {
++            const HRESULT hr = submission.present->Present(submission.presentSync, submission.presentFlags);
++            if (FAILED(hr)) lastPresentResult.store(hr);
++        }
+         if (D3D11CommandFence *fence = submission.fence) {
+             D3D11_QUERY_DESC q = {D3D11_QUERY_EVENT, 0};
+             Microsoft::WRL::ComPtr<ID3D11Query> query;
+@@ -1958,6 +1963,7 @@
+         bool vsync = true;
+         uint32_t width = 0, height = 0;
+         std::unique_ptr<D3D11Texture> texture;
++        uint64_t lastPresent = 0;  // submission number of the last deferred Present
+ 
+         ~D3D11SwapChain() override {
+             if (queue) queue->waitReplayed(queue->submitted.load(), UINT32_MAX);
+@@ -2022,9 +2028,26 @@
+         }
+ 
+         bool present(uint32_t, RenderCommandSemaphore **, uint32_t) override {
++            const UINT presentFlags = (!vsync && tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0;
++            if (D3D11DeferredPresent && queue->thread.joinable()) {
++                // In order after the frame's lists on the replay thread; wait only for the previous one.
++                D3D11CommandQueue::Submission s;
++                s.present = swapChain.Get();
++                s.presentSync = vsync ? 1 : 0;
++                s.presentFlags = presentFlags;
++                const uint64_t previous = lastPresent;
++                {
++                    std::lock_guard lock(queue->mutex);
++                    s.number = ++queue->submitted;
++                    lastPresent = s.number;
++                    queue->pending.push_back(std::move(s));
++                }
++                queue->work.notify_one();
++                if (previous) queue->waitReplayed(previous, UINT32_MAX);
++                return SUCCEEDED(queue->lastPresentResult.exchange(S_OK));
++            }
+             queue->waitReplayed(queue->submitted.load(), UINT32_MAX);
+             std::lock_guard lock(*device->contextMutex);
+-            const UINT presentFlags = (!vsync && tearing) ? DXGI_PRESENT_ALLOW_TEARING : 0;
+             return SUCCEEDED(swapChain->Present(vsync ? 1 : 0, presentFlags));
+         }
+ 
+--- a/plume_d3d11.h
++++ b/plume_d3d11.h
+@@ -209,7 +209,10 @@
+             std::vector<const RenderCommandList *> lists;
+             D3D11CommandFence *fence = nullptr;
+             uint64_t number = 0;
++            IDXGISwapChain1 *present = nullptr;  // D3D11DeferredPresent: Present after the lists
++            UINT presentSync = 0, presentFlags = 0;
+         };
++        std::atomic<HRESULT> lastPresentResult = S_OK;  // last deferred Present's result
+         std::mutex mutex;
+         std::condition_variable work, done;
+         std::deque<Submission> pending;
+@@ -326,4 +329,7 @@
+     extern uint32_t D3D11FlushDrawLimit;
+     // Submissions replayed on the queue's thread (false: in executeCommandLists).
+     extern bool D3D11AsyncReplay;
++    // Present queued on the replay thread after the frame's commands; present() waits only for the previous
++    // frame's Present (one frame in flight, as D3D12/Vulkan). Needs D3D11AsyncReplay. Default off.
++    extern bool D3D11DeferredPresent;
+ };
+diff --git a/port/src/reblue/gpu/present.cpp b/port/src/reblue/gpu/present.cpp
+index 8a36e15..6e016cc 100644
+--- a/port/src/reblue/gpu/present.cpp
++++ b/port/src/reblue/gpu/present.cpp
+@@ -26,6 +26,9 @@
+ #include <plume_render_interface.h>
+ 
+ #include <rex/cvar.h>
++#if defined(REBLUE_D3D11)
++#include <plume_d3d11.h>
++#endif
+ 
+ #include "gpu/gpu_profiling.h"
+ 
+@@ -47,6 +50,14 @@ unsigned SvrFxaaLevel();  // native/wwe13_gamma.cpp: svr_fxaa
+ // (svr_fxaa = 0) and the X360 sRGB decode unreachable in the native renderer leave the full
+ // gamma_correction_ps with an unused Fxaa() (8 extra samples) and an unused decode branch. The
+ // lite variant keeps the same sample, pow and scale, so the picture is byte-for-byte identical.
++#if defined(REBLUE_D3D11)
++// D3D11 on the UHD 630 (11-21): present() waited for the replay thread to finish the whole frame before
++// Present, so a frame cost the render thread's recording plus the replay thread's tail (loop 17-20 ms with
++// 8-9 ms "present wait", nearly the same at 540p). On: Present is queued after the frame's lists on the replay
++// thread and the render thread waits only for the previous frame's Present. Read every frame (live A/B).
++REXCVAR_DEFINE_BOOL(wwe13_d3d11_deferred_present, false, "WWE13",
++                    "D3D11: queue Present on the replay thread (one frame in flight) instead of waiting for it");
++#endif
+ REXCVAR_DEFINE_BOOL(wwe13_present_lite, false, "WWE13",
+                     "Cheaper present pass: FXAA-free / no-sRGB-decode pixel shader (svr_fxaa = 0)")
+     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+@@ -591,6 +602,9 @@ void Video::Present(GuestTexture *frontBuffer) {
+   s.command_list_submitted[cur] = true;
+   census::OnPresent();
+   ApplyVsync(s);
++#if defined(REBLUE_D3D11)
++  plume::D3D11DeferredPresent = REXCVAR_GET(wwe13_d3d11_deferred_present);
++#endif
+   {
+     BD_CPU_ZONE("PresentSwap");
+     const auto present_start = FrameStats::Clock::now();
