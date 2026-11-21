@@ -42,7 +42,7 @@ REXCVAR_DEFINE_BOOL(wwe13_renderq_sublist_count, false, "WWE13",
                     "Debug: count sub-list recordings that overlap the render queue replay, logged as "
                     "[wwe13-sublist] (entrance crash diagnostic)");
 
-REXCVAR_DEFINE_BOOL(wwe13_renderq_sublist_wait, false, "WWE13",
+REXCVAR_DEFINE_BOOL(wwe13_renderq_sublist_wait, true, "WWE13",
                     "Job threads that re-record a model's sub-list wait for the end of the frame's "
                     "command replay (entrance crash fix for the job overlap)");
 

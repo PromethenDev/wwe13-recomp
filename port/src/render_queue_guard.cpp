@@ -43,8 +43,9 @@ REXCVAR_DEFINE_BOOL(wwe13_renderq_guard, false, "WWE13",
 // lasts much longer and overlaps the recording. With --wwe13_renderq_serial=true the job threads
 // are started right after the replay instead (same work, in order): 0 crashes in 8 runs vs 8 in 16,
 // about 3 ms more render-thread work per frame. On by default since 2026-11-18 (iMrBurn's call).
-// To turn it off: wwe13_renderq_serial = false in wwe13.toml.
-REXCVAR_DEFINE_BOOL(wwe13_renderq_serial, true, "WWE13",
+// Default OFF since 11-20 (owner): overlap everywhere + wwe13_renderq_sublist_wait (laptop entrances 26.4 -> 30 fps).
+// To turn the old ordering back on: wwe13_renderq_serial = true in wwe13.toml.
+REXCVAR_DEFINE_BOOL(wwe13_renderq_serial, false, "WWE13",
                     "Start the render job threads after the frame's command replay instead of "
                     "before it (entrance crash lead)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
