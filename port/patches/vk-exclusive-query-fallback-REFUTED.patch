@@ -1,0 +1,73 @@
+# REFUTED 2026-11-20 (run vxf1, UHD 630): query reports fullScreenExclusiveSupported=1 (window = monitor = 1920x1080),
+# vkCreateSwapchainKHR still returns 0xFFFFFFFD; fallback to windowed works. Apply to native-deps/plume with patch -p0 from plume dir.
+--- plume_vulkan.cpp	2026-11-20 20:01:33.778146902 -0800
++++ plume_vulkan.cpp	2026-11-20 20:01:49.380380008 -0800
+@@ -2393,17 +2393,58 @@
+         VkSurfaceFullScreenExclusiveInfoEXT exclusiveInfo = {};
+         createInfo.pNext = nullptr;
+         fullScreenExclusiveAcquired = false;
++        bool requestExclusive = false;
+         if (commandQueue->device->fullScreenExclusiveSupported) {
+             exclusiveWin32Info.sType = VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_WIN32_INFO_EXT;
+             exclusiveWin32Info.hmonitor = MonitorFromWindow(desc.renderWindow, MONITOR_DEFAULTTOPRIMARY);
+             exclusiveInfo.sType = VK_STRUCTURE_TYPE_SURFACE_FULL_SCREEN_EXCLUSIVE_INFO_EXT;
+             exclusiveInfo.pNext = &exclusiveWin32Info;
+             exclusiveInfo.fullScreenExclusive = VK_FULL_SCREEN_EXCLUSIVE_APPLICATION_CONTROLLED_EXT;
+-            createInfo.pNext = &exclusiveInfo;
++            // Spec (VK_EXT_full_screen_exclusive): do not ask for it unless the surface reports
++            // fullScreenExclusiveSupported for this very combination (monitor, window).
++            VkPhysicalDeviceSurfaceInfo2KHR surfaceInfo2 = {};
++            surfaceInfo2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SURFACE_INFO_2_KHR;
++            surfaceInfo2.pNext = &exclusiveInfo;
++            surfaceInfo2.surface = surface;
++            VkSurfaceCapabilitiesFullScreenExclusiveEXT exclusiveCaps = {};
++            exclusiveCaps.sType = VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_FULL_SCREEN_EXCLUSIVE_EXT;
++            VkSurfaceCapabilities2KHR caps2 = {};
++            caps2.sType = VK_STRUCTURE_TYPE_SURFACE_CAPABILITIES_2_KHR;
++            caps2.pNext = &exclusiveCaps;
++            const VkResult capsRes = vkGetPhysicalDeviceSurfaceCapabilities2KHR(
++                commandQueue->device->physicalDevice, &surfaceInfo2, &caps2);
++            RECT client = {};
++            GetClientRect(desc.renderWindow, &client);
++            MONITORINFO monitorInfo = {};
++            monitorInfo.cbSize = sizeof(monitorInfo);
++            GetMonitorInfo(exclusiveWin32Info.hmonitor, &monitorInfo);
++            requestExclusive = capsRes == VK_SUCCESS && exclusiveCaps.fullScreenExclusiveSupported;
++            fprintf(stderr, "[plume] full-screen exclusive query: result 0x%X supported %u | swapchain %ux%u, "
++                    "window client %ldx%ld, monitor %ldx%ld\n", uint32_t(capsRes),
++                    uint32_t(exclusiveCaps.fullScreenExclusiveSupported), width, height,
++                    long(client.right - client.left), long(client.bottom - client.top),
++                    long(monitorInfo.rcMonitor.right - monitorInfo.rcMonitor.left),
++                    long(monitorInfo.rcMonitor.bottom - monitorInfo.rcMonitor.top));
++            if (requestExclusive)
++                createInfo.pNext = &exclusiveInfo;
+         }
+ #   endif
+ 
+         VkResult res = vkCreateSwapchainKHR(commandQueue->device->vk, &createInfo, nullptr, &vk);
++#   if defined(_WIN64)
++        if (res != VK_SUCCESS && createInfo.pNext != nullptr) {
++            // Refused anyway: a windowed swapchain rather than no picture at all.
++            fprintf(stderr, "[plume] exclusive swapchain refused (0x%X), retrying windowed\n", res);
++            createInfo.pNext = nullptr;
++            requestExclusive = false;
++            // The failed call retired oldSwapchain; a retired one must not be passed again
++            // (VUID-VkSwapchainCreateInfoKHR-oldSwapchain-01933). It is still destroyed below.
++            const VkSwapchainKHR retired = createInfo.oldSwapchain;
++            createInfo.oldSwapchain = VK_NULL_HANDLE;
++            res = vkCreateSwapchainKHR(commandQueue->device->vk, &createInfo, nullptr, &vk);
++            createInfo.oldSwapchain = retired;
++        }
++#   endif
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateSwapchainKHR failed with error code 0x%X.\n", res);
+             return false;
+@@ -2413,7 +2454,7 @@
+         createdPresentMode = requiredPresentMode;
+ 
+ #   if defined(_WIN64)
+-        if (commandQueue->device->fullScreenExclusiveSupported) {
++        if (requestExclusive) {
+             const VkResult exclusiveRes = vkAcquireFullScreenExclusiveModeEXT(commandQueue->device->vk, vk);
+             fullScreenExclusiveAcquired = (exclusiveRes == VK_SUCCESS);
+             fprintf(stderr, "[plume] full-screen exclusive %ux%u: %s (0x%X)\n", width, height,
