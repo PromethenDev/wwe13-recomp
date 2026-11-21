@@ -162,7 +162,7 @@ void GuestProbeTick(uint64_t frame) {
       i = j;
     }
     REXLOG_INFO("[guest-writes] {} ({} of {} calls sampled): device bytes changed by the game's function:{}",
-                name, set.sampled, set.calls, ranges.size() > 1500 ? ranges.substr(0, 1500) + " ..." : ranges);
+                name, set.sampled, set.calls, ranges.size() > 6000 ? ranges.substr(0, 6000) + " ..." : ranges);
   }
 }
 bool HookEnabled(const char* name) {

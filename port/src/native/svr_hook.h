@@ -124,6 +124,7 @@ void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
   extern "C" REX_FUNC(subroutine) {                              \
     PPCContext svr_args;                                         \
     ::svr::CopyArgs(svr_args, ctx);                              \
+    const uint32_t svr_device = ctx.r3.u32; /* the renderer's call leaves its result in svr_args.r3 */ \
     static ::svr::HookProf *const svr_prof = ::svr::RegisterHookProf(#subroutine); \
     const uint64_t svr_t0 = ::svr::g_hook_profile ? ::svr::HookNow() : 0; \
     ::svr::recorder::RecordHook(#subroutine, svr_args, ctx.r3.u32, false); \
@@ -132,10 +133,10 @@ void ReplayCall(PPCContext& args, uint32_t /*return_value*/, uint8_t* base) {
       rex::ppc::HostToGuestFunction<function>(svr_args, base);   \
     const uint64_t svr_t1 = svr_t0 ? ::svr::HookNow() : 0;       \
     if (::svr::g_guest_probe)                                    \
-      ::svr::GuestProbeBegin(#subroutine, svr_args.r3.u32, base); \
+      ::svr::GuestProbeBegin(#subroutine, svr_device, base);     \
     __imp__##subroutine(ctx, base);                              \
     if (::svr::g_guest_probe)                                    \
-      ::svr::GuestProbeEnd(#subroutine, svr_args.r3.u32, base);  \
+      ::svr::GuestProbeEnd(#subroutine, svr_device, base);       \
     if (svr_t0) {                                                \
       svr_prof->host_ns.fetch_add(svr_t1 - svr_t0, std::memory_order_relaxed); \
       svr_prof->guest_ns.fetch_add(::svr::HookNow() - svr_t1, std::memory_order_relaxed); \
