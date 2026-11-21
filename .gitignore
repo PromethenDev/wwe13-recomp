@@ -28,3 +28,5 @@ CMakeUserPresets.json
 
 # Local work files (dumped game shaders, captures): game-derived, never committed.
 /work/
+# Pipeline seed built from test sessions (tools/merge-pso-seed.py)
+port/pso-seed/

@@ -73,6 +73,10 @@ cp "$LAUNCHER_EXE" "$STAGE/WWE13 Launcher.exe"
 cp "$ROOT/port/wwe13_runtime.toml" "$STAGE/wwe13.toml"
 if grep -q '^[[:space:]]*user_language' "$STAGE/wwe13.toml"; then echo "wwe13.toml must not set user_language" >&2; exit 2; fi
 grep -q '^keybind_start' "$STAGE/wwe13.toml" || { echo "wwe13.toml has no keymap" >&2; exit 2; }
+# Pipeline seed (tools/merge-pso-seed.py over test sessions' userdata/cache/pipelines.bin; not in git): the game
+# pre-builds these at start, so a first session in a new folder does not stall on shader builds mid-match.
+PSO_SEED=${PSO_SEED:-$ROOT/port/pso-seed/pipelines_seed.w12p}
+if [ -f "$PSO_SEED" ]; then cp "$PSO_SEED" "$STAGE/pipelines_seed.w12p"; else echo "warning: no pipeline seed at $PSO_SEED" >&2; fi
 python3 "$ROOT/tools/scrub-build-paths.py" --old "$HOME/" --new "$(python3 -c 'import sys; n=len(sys.argv[1]); print(("/build/src/" + "x" * n)[:n-1] + "/")' "$HOME/")" \
   --account "$(basename "$HOME")" "$STAGE"/*.exe "$STAGE"/*.dll
 cp "$ROOT"/launcher2/ui/fonts/*-OFL.txt "$STAGE/licenses/launcher/"
