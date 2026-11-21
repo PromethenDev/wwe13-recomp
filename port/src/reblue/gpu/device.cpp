@@ -60,8 +60,18 @@ namespace plume {
 extern std::unique_ptr<RenderInterface> CreateD3D12Interface();
 #else
 extern std::unique_ptr<RenderInterface> CreateVulkanInterface();
+#if defined(_WIN32)
+extern bool VulkanDxgiPresent;  // plume_vulkan_dxgi.cpp
+#endif
 #endif
 } // namespace plume
+
+#if !defined(REBLUE_D3D11) && !defined(REBLUE_D3D12) && defined(_WIN32)
+REXCVAR_DEFINE_BOOL(wwe13_vk_dxgi_present, false, "WWE13",
+                    "Vulkan: present through a DXGI flip-model swap chain (shared D3D11 textures + keyed "
+                    "mutex) instead of the Vulkan swap chain, which the Intel UHD 630 composes by a copy")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+#endif
 
 REXCVAR_DEFINE_STRING(svr_gpu_device, "", "SvR",
                       "Vulkan name of the GPU to render with (empty = the most capable)");
@@ -353,6 +363,9 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
     // D3D12Core.dll that ends up owning the device.
     const bool dred_armed = EnableDred();
 #else
+#if defined(_WIN32)
+    plume::VulkanDxgiPresent = REXCVAR_GET(wwe13_vk_dxgi_present);
+#endif
     s.render_iface = plume::CreateVulkanInterface();
     if (!s.render_iface) {
       BD_ERROR("Plume CreateVulkanInterface failed");
