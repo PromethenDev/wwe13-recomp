@@ -21,6 +21,7 @@
 #include <limits>
 #include <cstring>
 #include <mutex>
+#include <unordered_set>
 
 #include <plume_render_interface.h>
 
@@ -473,6 +474,20 @@ bool Video::FlushRenderStateLocked(u32 device_guest) {
                   .count()),
           std::memory_order_relaxed);
     if (!pso) {
+      // 11-21: name each shader pair whose pipeline can't be built (its draws are dropped), once.
+      {
+        static std::mutex s_fail_mutex;
+        static std::unordered_set<u64> s_fail_seen;
+        const auto hash_of = [](const GuestShader *g) -> u64 {
+          return g && g->shaderCacheEntry ? g->shaderCacheEntry->hash : 0;
+        };
+        const u64 vs = hash_of(lookup.vertexShader), ps = hash_of(lookup.pixelShader);
+        std::lock_guard lock(s_fail_mutex);
+        if (s_fail_seen.size() < 64 && s_fail_seen.insert(vs ^ (ps * 0x9E3779B97F4A7C15ull)).second)
+          BD_WARN("[svr] pipeline build failed, its draws are dropped: vs 0x{:016X} ps 0x{:016X} "
+                  "rt fmt {} ds fmt {}",
+                  vs, ps, u32(lookup.renderTargetFormat), u32(lookup.depthStencilFormat));
+      }
       u32 n;
       if (DiagShouldLog(4, s.render_target, &n)) {
         BD_DEV_WARN("[draw-diag] #{} draw dropped: PSO build failed (vs={} ps={} "

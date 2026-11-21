@@ -199,9 +199,32 @@ void D3DDevice_SetScissorRect_hook(
   bd::gpu::state().dirtyStates.scissorRect = true;
 }
 
+#if defined(SVR_NATIVE_RENDERER)
+// 11-21 (the Rock '99 elbow pads never draw): a bound shader or declaration with no host object
+// drops its draws without a word in release builds. Name each such guest object once, with its
+// first words, so the owner's next log says which object and what kind it is.
+void LogUnpaired(const char *what, u32 guest) {
+  static std::mutex s_mutex;
+  static std::unordered_set<u32> s_seen;
+  std::lock_guard lock(s_mutex);
+  if (s_seen.size() >= 128 || !s_seen.insert(guest).second)
+    return;
+  u32 w[8];
+  for (u32 i = 0; i < 8; ++i)
+    w[i] = bd::mem::try_load<u32>(guest + 4 * i);
+  BD_WARN("[svr] {} 0x{:08X} has no host object, its draws are dropped | obj {:08X} {:08X} {:08X} "
+          "{:08X} {:08X} {:08X} {:08X} {:08X}",
+          what, guest, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+}
+#endif
+
 void D3DDevice_SetVertexShader_hook(u32 /*device*/, u32 shader_guest) {
 #if defined(SVR_NATIVE_RENDERER)
   auto *shader = bd::gpu::SvrLookupShader(shader_guest);
+  if (!shader && shader_guest)
+    LogUnpaired("vertex shader", shader_guest);
+  if (shader)
+    bd::gpu::SvrCheckShaderMicrocode(shader_guest);
 #else
   auto *shader =
       bd::gpu::HostResourceHeap::FromGuest<bd::gpu::GuestShader>(shader_guest);
@@ -212,6 +235,10 @@ void D3DDevice_SetVertexShader_hook(u32 /*device*/, u32 shader_guest) {
 void D3DDevice_SetPixelShader_hook(u32 /*device*/, u32 shader_guest) {
 #if defined(SVR_NATIVE_RENDERER)
   auto *shader = bd::gpu::SvrLookupShader(shader_guest);
+  if (!shader && shader_guest)
+    LogUnpaired("pixel shader", shader_guest);
+  if (shader)
+    bd::gpu::SvrCheckShaderMicrocode(shader_guest);
 #else
   auto *shader =
       bd::gpu::HostResourceHeap::FromGuest<bd::gpu::GuestShader>(shader_guest);
@@ -222,6 +249,8 @@ void D3DDevice_SetPixelShader_hook(u32 /*device*/, u32 shader_guest) {
 void D3DDevice_SetVertexDeclaration_hook(u32 /*device*/, u32 decl_guest) {
 #if defined(SVR_NATIVE_RENDERER)
   auto *decl = bd::gpu::SvrLookupVertexDeclaration(decl_guest);
+  if (!decl && decl_guest)
+    LogUnpaired("vertex declaration", decl_guest);
 #else
   auto *decl =
       bd::gpu::HostResourceHeap::FromGuest<bd::gpu::GuestVertexDeclaration>(

@@ -19,6 +19,8 @@ A joint release with iMrBurn's WWE '13 fork: his native renderers come to the ma
   resolution and frame rate in one click: **Steady 30** (720p, 30 everywhere), **Light** (540p),
   **Balanced** (720p), **Sharp** (1080p) and **Best** (1440p). **30 Locked** and **60 Everywhere** now
   work with the native renderers too.
+- **Smoother first play.** The game now pre-builds its graphics pipelines while it starts, so the
+  first matches after installing no longer stutter while shaders are prepared.
 - **QUIT in the main menu.** The main menu's shop entry is now **QUIT** and closes the game.
 - Built on the newer ReXGlue SDK 0.10.
 
