@@ -112,6 +112,7 @@ std::optional<FrameRate> ParseFrameRate(std::string_view value) {
   if (EqualsAsciiInsensitive(value, "classic")) return FrameRate::kClassic;
   if (EqualsAsciiInsensitive(value, "keep-60")) return FrameRate::kKeep60;
   if (EqualsAsciiInsensitive(value, "lock-30")) return FrameRate::kLock30;
+  if (EqualsAsciiInsensitive(value, "120")) return FrameRate::k120;
   return std::nullopt;
 }
 
@@ -139,6 +140,7 @@ std::string FrameRateName(FrameRate value) {
     case FrameRate::kClassic: return "classic";
     case FrameRate::kKeep60: return "keep-60";
     case FrameRate::kLock30: return "lock-30";
+    case FrameRate::k120: return "120";
   }
   return "classic";
 }

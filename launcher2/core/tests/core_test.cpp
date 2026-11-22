@@ -445,7 +445,16 @@ void TestPerformancePresets(const fs::path& root) {
   automatic.graphics_api = GraphicsApi::kEmulated;
   plan = BuildLaunchPlan(paths, automatic, {});
   assert(has(plan, "--present_letterbox=false") && !has(plan, "--bd_aspect_ratio=6"));
-  std::cout << "PASS performance presets (match/apply, port launch arguments, stretch to fill)\n";
+  // 120 fps: native renderer only, with both vsyncs off; not passed to the Xenos emulation.
+  Settings fast;
+  fast.explicit_choice = true;
+  fast.frame_rate = FrameRate::k120;
+  plan = BuildLaunchPlan(paths, fast, {});
+  assert(has(plan, "--wwe13_lock_fps=120") && has(plan, "--bd_vsync=false") && has(plan, "--vsync=false"));
+  fast.graphics_api = GraphicsApi::kEmulated;
+  plan = BuildLaunchPlan(paths, fast, {});
+  assert(!has(plan, "--wwe13_lock_fps=120"));
+  std::cout << "PASS performance presets (match/apply, port launch arguments, stretch to fill, 120 fps)\n";
 }
 }  // namespace
 

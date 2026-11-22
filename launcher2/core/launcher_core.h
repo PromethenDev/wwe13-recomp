@@ -51,7 +51,7 @@ bool IsPortBuild(const Paths& paths);
 // k576p is shown as 540p by the SDK 0.10 build (the native renderer's 540-line mode). k360p and k2160p (4K) exist
 // only in the SDK 0.10 build; the older build maps them to 480p and 1440p.
 enum class Resolution { k480p, k576p, k720p, k1080p, k1440p, k360p, k2160p };
-enum class FrameRate { kClassic, kKeep60, kLock30 };
+enum class FrameRate { kClassic, kKeep60, kLock30, k120 };
 enum class AntiAliasing { kOriginal4x, kFaster2x };
 enum class DisplayMode { kFullscreen, kWindowed };
 // SDK 0.10 builds (port/): which executable PLAY starts, as WWE '12 PC's Graphics API menu. kAuto starts

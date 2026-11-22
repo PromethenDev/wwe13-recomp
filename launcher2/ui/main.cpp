@@ -1561,6 +1561,7 @@ std::string FrameRateName(FrameRate value) {
     case FrameRate::kClassic: return "Classic";
     case FrameRate::kKeep60: return "60 Everywhere";
     case FrameRate::kLock30: return "30 Locked";
+    case FrameRate::k120: return "120";
   }
   return "Classic";
 }
@@ -2262,11 +2263,11 @@ void DrawSettings(AppState& app) {
     if (BeginPanel(app, "settings-framerate", ImVec2(card_width, S(app, compact ? 166.0f : 186.0f)))) {
       DrawPanelHeading(app, "FRAME RATE", "Choose the pace that suits your system.");
       ImGui::Spacing();
-      const std::array<std::pair<FrameRate, const char*>, 3> choices{{
+      const std::array<std::pair<FrameRate, const char*>, 4> choices{{
           {FrameRate::kClassic, "Classic"}, {FrameRate::kKeep60, "60 Everywhere"},
-          {FrameRate::kLock30, "30 Locked"},
+          {FrameRate::kLock30, "30 Locked"}, {FrameRate::k120, "120"},
       }};
-      const float segment_width = (ImGui::GetContentRegionAvail().x - 2.0f * ImGui::GetStyle().ItemSpacing.x) / 3.0f;
+      const float segment_width = (ImGui::GetContentRegionAvail().x - 3.0f * ImGui::GetStyle().ItemSpacing.x) / 4.0f;
       for (size_t i = 0; i < choices.size(); ++i) {
         if (i) ImGui::SameLine();
         DrawSegment(app, choices[i].second, current.frame_rate == choices[i].first, segment_width, [&app, value = choices[i].first] {
@@ -2279,6 +2280,8 @@ void DrawSettings(AppState& app) {
                              ? "60 in matches, 30 in entrances and cutscenes (like the console)"
                          : current.frame_rate == FrameRate::kKeep60
                              ? "60 Everywhere - needs a strong PC"
+                         : current.frame_rate == FrameRate::k120
+                             ? "120 in matches, 60 in entrances - 120 Hz+ screen, strong PC, native renderer"
                              : "Steady 30 everywhere - best for laptops and handhelds";
       DrawTextDisabled(app, hint);
     }

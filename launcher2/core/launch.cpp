@@ -326,6 +326,13 @@ LaunchPlan BuildPortLaunchPlan(const Paths& paths, const Settings& settings, con
   // Frame rate (performance presets, 2026-11-21): port/src/frame_rate_lock.cpp, in every SDK 0.10 executable.
   if (effective.frame_rate == FrameRate::kLock30) plan.arguments.emplace_back("--wwe13_lock_30=true");
   else if (effective.frame_rate == FrameRate::kKeep60) plan.arguments.emplace_back("--wwe13_keep_60=true");
+  else if (effective.frame_rate == FrameRate::k120 && native) {
+    // 120 fps (port/src/frame_rate_lock.cpp): native renderers only (the Xenos path has no present cap).
+    // The 60 Hz guest vblank and present vsync would hold it at 60; the game paces itself at 120.
+    plan.arguments.emplace_back("--wwe13_lock_fps=120");
+    plan.arguments.emplace_back("--bd_vsync=false");
+    plan.arguments.emplace_back("--vsync=false");
+  }
   plan.environment = {{"REX_DEBUG_UI", "false"}};
   return plan;
 }
