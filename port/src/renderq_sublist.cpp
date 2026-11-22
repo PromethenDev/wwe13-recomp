@@ -127,7 +127,7 @@ void PoolRecorded(uint32_t pool, uint32_t pool_base, uint32_t end) {
 thread_local uint32_t t_open_gen = 0;
 std::atomic<uint32_t> g_gen{0};
 
-uint32_t RateIndex(uint8_t* base) { return Ld32(base, kGameFrameRate) == 60 ? 0u : 1u; }
+uint32_t RateIndex(uint8_t* base) { return Ld32(base, kGameFrameRate) >= 60 ? 0u : 1u; }
 
 void Summary(uint8_t* base) {
   using Clock = std::chrono::steady_clock;

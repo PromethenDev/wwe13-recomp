@@ -40,7 +40,7 @@ REXCVAR_DEFINE_BOOL(wwe13_keep_60, false, "WWE13",
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 REXCVAR_DEFINE_INT32(wwe13_lock_fps, 0, "WWE13",
-                     "Locked frame rate for the whole session: 40 or 50 (0 = off; other values are ignored)")
+                     "Locked frame rate for the whole session: 40, 50 or 120 (0 = off; other values are ignored)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
 REX_EXTERN(__imp__sub_82AA6410);  // set rate (r3 = 0/25/30/50/60)
@@ -61,7 +61,7 @@ constexpr uint32_t kRateStruct = 0x835B2DE8;
 
 int LockFps() {
   const int v = REXCVAR_GET(wwe13_lock_fps);
-  return v == 40 || v == 50 ? v : 0;
+  return v == 40 || v == 50 || v == 120 ? v : 0;
 }
 
 void St32(uint8_t* base, uint32_t off, uint32_t v) {
@@ -83,6 +83,9 @@ void StF(uint8_t* base, uint32_t off, float f) {
 }
 
 std::atomic<bool> g_lock30_active{false};
+// 120 lock: entrances / cutscenes run at the game's own 60 (a 1/120 s step needs 120 real frames, and entrances
+// reached only ~100 fps on an i5-12600KF: 17 % slow). Matches and menus stay at 120.
+std::atomic<bool> g_scene60{false};
 std::atomic<uint32_t> g_logged{0};
 bool LogMore() { return g_logged.fetch_add(1, std::memory_order_relaxed) < 200; }
 
@@ -91,6 +94,7 @@ bool LogMore() { return g_logged.fetch_add(1, std::memory_order_relaxed) < 200; 
 // Presents per second the renderer's PaceFrame allows (reblue/gpu/present.cpp via engine.h): the lock rate or 60.
 int Wwe13PresentFpsLimit() {
   const int fps = LockFps();
+  if (fps == 120 && g_scene60.load(std::memory_order_relaxed)) return 60;
   return fps ? fps : 60;
 }
 
@@ -103,14 +107,19 @@ extern "C" REX_FUNC(sub_82AA6410) {
   }
   ctx.r3.u64 = lock == 50 ? 50 : 60;
   __imp__sub_82AA6410(ctx, base);
-  if (lock == 40) {
-    const float k36 = LdF(base, 36) * 1.5f;  // constant/60 -> constant/40
-    St32(base, 8, 40);
-    StF(base, 32, 40.0f);
-    StF(base, 28, 1.0f / 40.0f);
-    StF(base, 60, 60.0f / 40.0f);
-    StF(base, 64, 40.0f / 60.0f);
-    St32(base, 40, 25);
+  if (lock == 40 || lock == 120) {
+    // No game table: the 60 table rescaled to the lock rate (120: 1/120 s steps, the game runs each step
+    // twice as often, so game speed stays right as it did at 40).
+    const float r = float(lock);
+    const float k36 = LdF(base, 36) * (60.0f / r);  // constant/60 -> constant/rate
+    // 120: the rate field keeps reading 60 so the game's own scene logic (entrance 60 -> 30 requests, the 37
+    // rate checks) behaves exactly as at 60; only the time step and present rate change.
+    St32(base, 8, lock == 120 ? 60u : uint32_t(lock));
+    StF(base, 32, r);
+    StF(base, 28, 1.0f / r);
+    StF(base, 60, 60.0f / r);
+    StF(base, 64, r / 60.0f);
+    St32(base, 40, lock == 40 ? 25u : 8u);  // whole ms per frame (120: 8.33 -> 8)
     StF(base, 36, k36);
   }
   if (LogMore())
@@ -121,6 +130,13 @@ extern "C" REX_FUNC(sub_82AA6410) {
 
 extern "C" REX_FUNC(sub_82AA65B0) {
   const uint32_t rate = Rate(base);
+  if (LockFps() == 120) {  // entrance / cutscene: the game's own 60 table, presents capped at 60
+    ctx.r3.u64 = 60;
+    __imp__sub_82AA6410(ctx, base);
+    g_scene60.store(true, std::memory_order_relaxed);
+    if (LogMore()) REXLOG_INFO("[wwe13-rate] halve request at rate {} -> 60 for the scene (lock 120)", rate);
+    return;
+  }
   if (LockFps()) {
     if (LogMore()) REXLOG_INFO("[wwe13-rate] halve request at rate {} skipped (lock {})", rate, LockFps());
     return;
@@ -145,6 +161,13 @@ extern "C" REX_FUNC(sub_82AA65B0) {
 }
 
 extern "C" REX_FUNC(sub_82AA6650) {
+  if (LockFps() == 120) {  // back to 120 through the locked setter above
+    const bool was60 = g_scene60.exchange(false, std::memory_order_relaxed);
+    ctx.r3.u64 = 60;
+    sub_82AA6410(ctx, base);
+    if (LogMore()) REXLOG_INFO("[wwe13-rate] restore request ({}) -> rate {}", was60 ? "scene 60" : "not halved", Rate(base));
+    return;
+  }
   if (LockFps()) {  // never halved, nothing to restore; the log line marks the end of an entrance / cutscene
     if (LogMore()) REXLOG_INFO("[wwe13-rate] restore request at rate {} skipped (lock {})", Rate(base), LockFps());
     return;

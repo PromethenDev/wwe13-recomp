@@ -139,7 +139,7 @@ bool SceneSerial(const uint8_t* base) {
       REXLOG_INFO("[wwe13-renderq] game frame rate {} -> {}", int32_t(last_rate), rate);
     last_rate = rate;
   }
-  if (rate != 60) {
+  if (rate < 60) {  // 60 or the locked 120 (frame_rate_lock.cpp) = a steady fast scene
     steady = 0;
     return true;
   }
