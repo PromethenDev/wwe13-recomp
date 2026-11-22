@@ -413,14 +413,20 @@ void TestPerformancePresets(const fs::path& root) {
   Paths paths = MakePaths(root / "presets");
   fs::create_directories(paths.exe_dir);
   { std::ofstream(paths.exe_dir / "rexruntime.dll") << "x"; }
-  { std::ofstream(paths.exe_dir / "wwe13_d3d12.exe") << "x"; }
+  { std::ofstream(paths.exe_dir / "librexruntime.so") << "x"; }
+#ifdef _WIN32
+  const char* native_exe = "wwe13_d3d12.exe";
+#else
+  const char* native_exe = "wwe13_native";  // Linux: Vulkan only
+#endif
+  { std::ofstream(paths.exe_dir / native_exe) << "x"; }
   auto has = [](const LaunchPlan& plan, const std::string& arg) {
     return std::find(plan.arguments.begin(), plan.arguments.end(), arg) != plan.arguments.end();
   };
   Settings s;
   ApplyPerformancePreset(s, 0);  // Steady 30
   LaunchPlan plan = BuildLaunchPlan(paths, s, {});
-  assert(plan.executable.filename() == "wwe13_d3d12.exe");
+  assert(plan.executable.filename() == native_exe);
   assert(has(plan, "--svr_render_scale=720") && has(plan, "--wwe13_lock_30=true") && !has(plan, "--wwe13_keep_60=true"));
   ApplyPerformancePreset(s, 3);  // Sharp
   plan = BuildLaunchPlan(paths, s, {});
@@ -431,7 +437,15 @@ void TestPerformancePresets(const fs::path& root) {
   Settings automatic;  // no explicit choice: automatic resolution, the game's own frame rate
   plan = BuildLaunchPlan(paths, automatic, {});
   for (const auto& arg : plan.arguments) assert(arg.rfind("--svr_render_scale", 0) != 0 && arg.rfind("--wwe13_lock", 0) != 0);
-  std::cout << "PASS performance presets (match/apply, port launch arguments)\n";
+  // Stretch to fill (GH #79): the native renderer gets bd_aspect_ratio=6, the Xenos emulation present_letterbox=false.
+  assert(!has(plan, "--bd_aspect_ratio=6"));
+  automatic.stretch_to_fill = true;
+  plan = BuildLaunchPlan(paths, automatic, {});
+  assert(has(plan, "--bd_aspect_ratio=6") && !has(plan, "--present_letterbox=false"));
+  automatic.graphics_api = GraphicsApi::kEmulated;
+  plan = BuildLaunchPlan(paths, automatic, {});
+  assert(has(plan, "--present_letterbox=false") && !has(plan, "--bd_aspect_ratio=6"));
+  std::cout << "PASS performance presets (match/apply, port launch arguments, stretch to fill)\n";
 }
 }  // namespace
 

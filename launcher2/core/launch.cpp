@@ -311,8 +311,13 @@ LaunchPlan BuildPortLaunchPlan(const Paths& paths, const Settings& settings, con
       plan.arguments.emplace_back("--svr_render_scale=" + std::to_string(PortRenderHeight(effective.resolution)));
     if (!settings.gpu_id.empty() && selected_gpu != gpus.end())
       plan.arguments.emplace_back("--svr_gpu_device=" + selected_gpu->name);
+    // Stretch to fill (GH #79): re:Blue's output shape, 6 = fill the display and stretch (gpu/settings.cpp
+    // bd_aspect_ratio). v1.6.0 passed nothing here, so the native renderers kept the 16:9 bars.
+    if (effective.stretch_to_fill) plan.arguments.emplace_back("--bd_aspect_ratio=6");
   } else {
     plan.arguments.emplace_back("--gpu_plugin=xenos");
+    // Stretch to fill (GH #79) on the Xbox 360 emulation: the SDK presenter's letterbox switch.
+    if (effective.stretch_to_fill) plan.arguments.emplace_back("--present_letterbox=false");
     if (effective.resolution == Resolution::k1440p) plan.arguments.emplace_back("--resolution_scale=2");
     if (effective.resolution == Resolution::k2160p) plan.arguments.emplace_back("--resolution_scale=3");
     if (!settings.gpu_id.empty() && selected_gpu != gpus.end() && selected_gpu->vulkan_index >= 0)
