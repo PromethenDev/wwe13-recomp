@@ -6,6 +6,8 @@
 
 #pragma once
 
+int Wwe13PresentFpsLimit();  // port/src/frame_rate_lock.cpp
+
 namespace bd::engine {
 
 // Blue Dragon skips presenting some frames while its frame interpolation runs; SvR presents every
@@ -23,9 +25,9 @@ struct Settings {
     static Settings settings;
     return settings;
   }
-  // SvR's game logic runs at the 60 fps mode src/fps_hooks.cpp keeps it in, and its own vblank
-  // pacing no longer gates presents (the null GPU skips swaps), so presents are capped at 60.
-  int FPSLimit() const { return 60; }
+  // WWE '13: presents are capped at 60, or at the locked 40 / 50 rate (port/src/frame_rate_lock.cpp,
+  // --wwe13_lock_fps): the game's own vblank pacing no longer gates presents (the null GPU skips swaps).
+  int FPSLimit() const { return ::Wwe13PresentFpsLimit(); }
 };
 
 }  // namespace bd::engine
