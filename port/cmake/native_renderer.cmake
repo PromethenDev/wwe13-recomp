@@ -79,6 +79,11 @@ if(WIN32 AND (WWE13_D3D12_EXE OR WWE13_D3D11_EXE))
 else()
     set(PLUME_D3D12_ENABLED OFF CACHE BOOL "" FORCE)
 endif()
+# Linux: plume's RenderWindow is the SDK's SDL window itself (src/reblue/platform/native_window.cpp), with the
+# SDK's own static SDL3.
+if(NOT WIN32 AND NOT APPLE AND NOT ANDROID)
+    set(PLUME_SDL_VULKAN_ENABLED ON CACHE BOOL "" FORCE)
+endif()
 add_subdirectory("${WWE13_PLUME_DIR}" "${CMAKE_BINARY_DIR}/plume" EXCLUDE_FROM_ALL)
 
 # Small third-party pieces the renderer uses.
@@ -346,10 +351,20 @@ function(wwe13_add_native_renderer target)
             target_sources(${target} PRIVATE "${WWE13_SHADER_CACHE}")
         endif()
         target_link_libraries(${target} PRIVATE wwe13_xenosrecomp)
-        add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WWE13_DXCOMPILER_DLL}"
-                "$<TARGET_FILE_DIR:${target}>/dxcompiler.dll"
-            VERBATIM)
+        if(WIN32)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${WWE13_DXCOMPILER_DLL}"
+                    "$<TARGET_FILE_DIR:${target}>/dxcompiler.dll"
+                VERBATIM)
+        else()
+            # Linux: DXC for shaders missing from the built-in cache (libdxcompiler.so dlopens libdxil.so),
+            # and the SDK runtime the exe finds through RUNPATH $ORIGIN.
+            set(_dxc_lib "${WWE13_XENOS_DIR}/thirdparty/dxc-bin/lib/x64")
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dxc_lib}/libdxcompiler.so"
+                    "${_dxc_lib}/libdxil.so" "$<TARGET_FILE:rex::runtime>" "$<TARGET_FILE_DIR:${target}>"
+                VERBATIM)
+        endif()
     endif()
     target_sources(${target} PRIVATE ${sources} ${host_shaders})
     target_include_directories(${target} PRIVATE
@@ -367,6 +382,11 @@ function(wwe13_add_native_renderer target)
         set(_names_include "-include;${WWE13_NATIVE_ROOT}/src/native/wwe13_d3d_names.h")
     endif()
     set_source_files_properties(${WWE13_NATIVE_SOURCES} PROPERTIES COMPILE_OPTIONS "${_names_include}")
+    if(NOT WIN32)
+        # dxcapi.h off Windows (WinAdapter.h) declares its COM interfaces with __declspec(uuid).
+        set_property(SOURCE "${WWE13_NATIVE_ROOT}/src/native/wwe13_shader_cache.cpp" APPEND PROPERTY
+            COMPILE_OPTIONS -fms-extensions)
+    endif()
     target_link_libraries(${target} PRIVATE plume wwe13_native_thirdparty rex::o1heap)
     # Linker map: names recompiled functions in crash stacks.
     if(MSVC)

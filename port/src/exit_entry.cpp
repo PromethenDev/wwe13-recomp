@@ -19,9 +19,13 @@
 #include <cstdint>
 #include <cstring>
 
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#else
+#include <SDL3/SDL_events.h>
+#endif
 
 #include <rex/cvar.h>
 #include <rex/logging/macros.h>
@@ -43,11 +47,24 @@ uint32_t Ld32(const uint8_t* base, uint32_t a) {
   return __builtin_bswap32(v);
 }
 
+#if defined(_WIN32)
 BOOL CALLBACK CloseOwnWindow(HWND hwnd, LPARAM) {
   DWORD pid = 0;
   GetWindowThreadProcessId(hwnd, &pid);
   if (pid == GetCurrentProcessId() && IsWindowVisible(hwnd)) PostMessageW(hwnd, WM_CLOSE, 0, 0);
   return TRUE;
+}
+#endif
+
+// Ask the game window to close, as its close button does.
+void CloseGameWindow() {
+#if defined(_WIN32)
+  EnumWindows(CloseOwnWindow, 0);
+#else
+  SDL_Event quit{};
+  quit.type = SDL_EVENT_QUIT;
+  SDL_PushEvent(&quit);
+#endif
 }
 }  // namespace
 
@@ -65,7 +82,7 @@ extern "C" REX_FUNC(sub_828325F0) {
     static std::atomic<bool> closing{false};
     if (!closing.exchange(true)) {
       REXLOG_INFO("[wwe13-exit] EXIT chosen in the main menu: closing the game");
-      EnumWindows(CloseOwnWindow, 0);
+      CloseGameWindow();
     }
     return;
   }

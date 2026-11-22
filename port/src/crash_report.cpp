@@ -15,6 +15,7 @@
 #include <string>
 #include <thread>
 
+#if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -23,9 +24,11 @@
 #include <tlhelp32.h>
 
 #pragma comment(lib, "dbghelp.lib")
+#endif
 
 std::atomic<uint64_t> g_wwe13_present_count{0};  // counted by the Swap hook once it exists
 
+#if defined(_WIN32)
 namespace {
 
 std::filesystem::path LogsDir() {
@@ -215,3 +218,7 @@ void InstallWwe13CrashReporter() {
   // Freeze watchdog: started once g_wwe13_present_count is counted (Swap hook, step 2).
   (void)started;
 }
+#else
+// Linux: the SDK's own signal handlers report crashes; no Windows minidump here.
+void InstallWwe13CrashReporter() {}
+#endif
