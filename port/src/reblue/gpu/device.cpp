@@ -71,6 +71,10 @@ REXCVAR_DEFINE_BOOL(wwe13_vk_dxgi_present, true, "WWE13",
                     "Vulkan: present through a DXGI flip-model swap chain (shared D3D11 textures + keyed "
                     "mutex) instead of the Vulkan swap chain, which the Intel UHD 630 composes by a copy")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+REXCVAR_DEFINE_INT32(wwe13_vk_dxgi_fallback_test, 0, "WWE13",
+                     "Test only: 1 = treat the DXGI swap chain as failed at start, 2 = after 600 presents "
+                     "(exercises the fall-back to the Vulkan swap chain)")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 #endif
 
 REXCVAR_DEFINE_STRING(svr_gpu_device, "", "SvR",
@@ -102,6 +106,35 @@ plume::RenderColor ArgbToRenderColor(u32 argb) {
                             ChannelFromArgb(argb, 0),
                             ChannelFromArgb(argb, 24));
 }
+
+#if !defined(REBLUE_D3D11) && !defined(REBLUE_D3D12) && defined(_WIN32)
+// The DXGI present path passed its start-up probe but then failed (first resize, or presents):
+// build the plain Vulkan swap chain on the same window instead, so the game still shows a picture.
+// Caller has waited all frame fences. Frame-buffers and present semaphores are left for the caller
+// to rebuild; acquire semaphores are made new (a failed DXGI acquire may have left one pending).
+bool FallBackToVulkanSwapChain(VideoState &s, const char *why) {
+  if (!plume::VulkanDxgiPresentActive || !s.swap_chain)
+    return false;
+  BD_WARN("[present] DXGI flip swap chain failed ({}): switching to the Vulkan swap chain", why);
+  const plume::RenderWindow window = s.swap_chain->getWindow();
+  s.framebuffers.clear();
+  s.render_semaphores.clear();
+  s.swap_chain.reset();
+  plume::VulkanDxgiPresent = false;
+  for (u32 i = 0; i < kNumFrames; ++i)
+    s.acquire_semaphores[i] = s.device->createCommandSemaphore();
+  plume::RenderSwapChainDesc desc(window, kSwapChainFormat, kNumFrames + 1, false, kNumFrames);
+  s.swap_chain = s.queue->createSwapChain(desc);
+  if (s.swap_chain)
+    s.swap_chain->resize();
+  if (!s.swap_chain || s.swap_chain->isEmpty()) {
+    BD_ERROR("[present] Vulkan swap chain fall-back failed too");
+    return false;
+  }
+  BD_INFO("[present] Vulkan frames go through the Vulkan swap chain (fall-back)");
+  return true;
+}
+#endif
 
 bool BuildFramebuffers(VideoState &s) {
   s.framebuffers.clear();
@@ -516,6 +549,11 @@ bool Video::CreateHostDevice(rex::ui::Window *window) {
     if (s.swap_chain) {
       s.swap_chain->resize();
     }
+#if defined(_WIN32) && !defined(REBLUE_D3D11)
+    if (s.swap_chain && plume::VulkanDxgiPresentActive &&
+        (s.swap_chain->isEmpty() || REXCVAR_GET(wwe13_vk_dxgi_fallback_test) == 1))
+      FallBackToVulkanSwapChain(s, s.swap_chain->isEmpty() ? "first resize" : "test");
+#endif
 #endif
     if (!s.swap_chain || s.swap_chain->isEmpty()) {
       BD_ERROR("Plume createSwapChain failed");

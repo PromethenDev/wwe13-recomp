@@ -74,9 +74,6 @@ struct GuestVertexElement;
 void SvrOnShaderCreated(u32 shader_va, u32 function_va, bool pixel);
 // Same, from a copy of the shader container (recorder replay: the game's buffer may be gone by then).
 void SvrRegisterShaderContainer(u32 shader_va, const void *container, bool pixel);
-// Diagnostics (11-21): watch a shader's microcode in game memory; warn once if the game changes it.
-void SvrWatchShaderMicrocode(u32 shader_va, const void *container, bool pixel);
-void SvrCheckShaderMicrocode(u32 shader_va);
 GuestShader *SvrLookupShader(u32 shader_va);
 void SvrOnVertexDeclarationCreated(u32 decl_va, u32 elements_va);
 // Same, from a copy of the elements (terminated by stream 0xFF; recorder replay).

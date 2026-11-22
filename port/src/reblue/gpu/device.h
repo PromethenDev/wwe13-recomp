@@ -536,6 +536,9 @@ bool BuildPipelineLayout(VideoState &s);
 bool BuildCopyPipeline(VideoState &s);
 bool BuildFramebuffers(VideoState &s);
 bool BuildPresentSemaphores(VideoState &s);
+#if !defined(REBLUE_D3D11) && !defined(REBLUE_D3D12) && defined(_WIN32)
+bool FallBackToVulkanSwapChain(VideoState &s, const char *why);  // device.cpp
+#endif
 #if defined(__ANDROID__)
 void NoteSwapChainWindow(plume::RenderWindow window);  // present.cpp: window to watch
 #endif

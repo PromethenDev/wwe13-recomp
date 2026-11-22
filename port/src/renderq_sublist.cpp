@@ -13,9 +13,9 @@
 // between the job start and the end of the replay, and replay entries into a sub-list range that was
 // (re)recorded since that job start, split by the game's frame rate (30 = entrances, 60 = match).
 //
-// wwe13_renderq_sublist_wait (default off): a job thread that begins a sub-list in that window, in
+// wwe13_renderq_sublist_wait (default on since 11-20): a job thread that begins a sub-list in that window, in
 // pool memory the replay in flight may still point into, waits for the end of the replay first (at
-// most 50 ms, logged), so only that recording keeps the order wwe13_renderq_serial gives to all job
+// most 250 ms, logged), so only that recording keeps the order wwe13_renderq_serial gives to all job
 // work. Meant for wwe13_renderq_serial=false or wwe13_renderq_serial_scene=true (while the jobs are
 // started after the replay it never waits).
 //
@@ -52,7 +52,7 @@ REX_EXTERN(__imp__sub_82AA4438);  // end it
 namespace {
 
 constexpr uint32_t kGameFrameRate = 0x835B2DE8 + 8;
-constexpr auto kWaitLimit = std::chrono::milliseconds(50);
+constexpr auto kWaitLimit = std::chrono::milliseconds(250);
 
 uint8_t* Host(uint8_t* base, uint32_t a) { return base + a + (a >= 0xE0000000u ? 0x1000u : 0u); }
 uint32_t Ld32(uint8_t* base, uint32_t a) {

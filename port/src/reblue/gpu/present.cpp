@@ -47,6 +47,11 @@ unsigned SvrFxaaLevel();  // native/wwe13_gamma.cpp: svr_fxaa
 // (svr_fxaa = 0) and the X360 sRGB decode unreachable in the native renderer leave the full
 // gamma_correction_ps with an unused Fxaa() (8 extra samples) and an unused decode branch. The
 // lite variant keeps the same sample, pow and scale, so the picture is byte-for-byte identical.
+#if !defined(REBLUE_D3D11) && !defined(REBLUE_D3D12) && defined(_WIN32)
+#include <plume_vulkan.h>  // VulkanDxgiPresentActive
+REXCVAR_DECLARE(int32_t, wwe13_vk_dxgi_fallback_test);  // device.cpp
+#define WWE13_DXGI_FALLBACK 1
+#endif
 REXCVAR_DEFINE_BOOL(wwe13_present_lite, false, "WWE13",
                     "Cheaper present pass: FXAA-free / no-sRGB-decode pixel shader (svr_fxaa = 0)")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
@@ -62,6 +67,11 @@ void ApplyVsync(VideoState &s) {
 }
 
 constexpr i32 kIdleFPS = 30;
+
+#if defined(WWE13_DXGI_FALLBACK)
+u32 s_dxgi_acquire_fails = 0;  // present thread only (under s.mutex)
+u32 s_dxgi_test_presents = 0;
+#endif
 
 void PaceFrame(bool idle = false) {
   using Clock = std::chrono::steady_clock;
@@ -177,6 +187,19 @@ bool ResizeSwapChain(VideoState &s) {
 }
 
 // new_window (Android): build the swap chain again on that window instead of resizing it.
+#if defined(WWE13_DXGI_FALLBACK)
+// Submits the open list and waits every frame in flight (the GPU is idle afterwards).
+void WaitAllFrames(VideoState &s) {
+  SubmitOpenListLocked(s);
+  for (u32 i = 0; i < kNumFrames; ++i) {
+    if (s.command_list_submitted[i]) {
+      s.queue->waitForCommandFence(s.fences[i].get());
+      s.command_list_submitted[i] = false;
+    }
+  }
+}
+#endif
+
 void RebuildSwapChain(VideoState &s, plume::RenderWindow new_window = nullptr) {
   SubmitOpenListLocked(s);
   for (u32 i = 0; i < kNumFrames; ++i) {
@@ -525,6 +548,17 @@ void Video::Present(GuestTexture *frontBuffer) {
   }
 
   if (s.framebuffers.empty()) {
+#if defined(WWE13_DXGI_FALLBACK)
+    // The DXGI chain could not be resized (window or display change) and the window is not
+    // minimized: after 3 such frames use the Vulkan swap chain instead of staying black.
+    if (plume::VulkanDxgiPresentActive && s.swap_chain && s.swap_chain->getWidth() &&
+        s.swap_chain->getHeight() && ++s_dxgi_acquire_fails >= 3) {
+      s_dxgi_acquire_fails = 0;
+      WaitAllFrames(s);
+      if (FallBackToVulkanSwapChain(s, "resize failed"))
+        BuildFramebuffers(s) && BuildPresentSemaphores(s);
+    }
+#endif
     AbandonFrame(s, lock);
     if (lock.owns_lock())
       lock.unlock();
@@ -546,11 +580,33 @@ void Video::Present(GuestTexture *frontBuffer) {
                   .get(),
               &texture_index)) {
         CheckDeviceRemoved("swapchain acquire");
+#if defined(WWE13_DXGI_FALLBACK)
+        // 3 frames in a row without an image on the DXGI path (e.g. a driver that imports the
+        // shared textures but fails the keyed-mutex submit): use the Vulkan swap chain instead.
+        // RebuildSwapChain above waited every frame fence, so nothing is in flight.
+        if (plume::VulkanDxgiPresentActive && ++s_dxgi_acquire_fails >= 3) {
+          s_dxgi_acquire_fails = 0;
+          if (FallBackToVulkanSwapChain(s, "3 frames without an image"))
+            BuildFramebuffers(s) && BuildPresentSemaphores(s);
+        }
+#endif
         AbandonFrame(s, lock);
         return;
       }
     }
   }
+#if defined(WWE13_DXGI_FALLBACK)
+  s_dxgi_acquire_fails = 0;
+  if (REXCVAR_GET(wwe13_vk_dxgi_fallback_test) == 2 && plume::VulkanDxgiPresentActive &&
+      ++s_dxgi_test_presents == 600) {
+    // Test only: same switch as above, mid-game (fences waited first, like RebuildSwapChain).
+    WaitAllFrames(s);
+    if (FallBackToVulkanSwapChain(s, "test"))
+      BuildFramebuffers(s) && BuildPresentSemaphores(s);
+    AbandonFrame(s, lock);
+    return;
+  }
+#endif
 
   plume::RenderTexture *back = s.swap_chain->getTexture(texture_index);
   plume::RenderFramebuffer *back_fb = s.framebuffers[texture_index].get();

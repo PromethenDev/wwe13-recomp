@@ -4,7 +4,10 @@
 # reblue-XenosRecomp from it (no download), resets the copies to the commits WWE '12 PC pins and applies
 # port\patches in WWE '12 PC's order, so one plume builds the Vulkan, Direct3D 12 and Direct3D 11
 # executables:
-#   plume:              plume-reblue, plume-pipeline-cache (WWE 2K15 PC), plume-d3d12, plume-d3d11
+#   plume:              plume-reblue, plume-pipeline-cache (WWE 2K15 PC), plume-d3d12, plume-d3d11,
+#                       plume-fullscreen-exclusive, plume-vk-dxgi-present, plume-vk-dxgi-present-active
+#                       (the last three: Vulkan frames through a DXGI flip swap chain; *-REFUTED patches are
+#                       kept as records only and never applied)
 #   reblue-XenosRecomp: xenosrecomp-reblue-wwe12 (WWE '12 PC's: the 2K15 one plus the DXIL depth flip)
 # then builds XenosRecomp.exe (REBLUE_RECOMP), which turns the game's shaders into the build-time caches
 # of wwe13_d3d12.exe / wwe13_d3d11.exe.
@@ -60,7 +63,8 @@ function Prepare-Repo([string]$name, [string]$commit, [string[]]$names) {
 }
 
 Prepare-Repo "plume" "e0c8871" @("plume-reblue.patch", "plume-pipeline-cache.patch", "plume-d3d12.patch",
-  "plume-d3d11.patch") | Out-Null
+  "plume-d3d11.patch", "plume-fullscreen-exclusive.patch", "plume-vk-dxgi-present.patch",
+  "plume-vk-dxgi-present-active.patch") | Out-Null
 $xrChanged = Prepare-Repo "reblue-XenosRecomp" "339af41" @("xenosrecomp-reblue-wwe12.patch")
 
 $xr = Join-Path $DestDir "reblue-XenosRecomp"

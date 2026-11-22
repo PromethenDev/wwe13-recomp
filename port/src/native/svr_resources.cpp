@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstring>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -1064,8 +1063,6 @@ void SvrRegisterShaderContainer(u32 shader_va, const void *container_bytes, bool
     host = CreateShader(reinterpret_cast<const be_u32 *>(container),
                         pixel ? ResourceType::PixelShader : ResourceType::VertexShader);
   g_shaders[shader_va] = host;
-  lock.unlock();
-  SvrWatchShaderMicrocode(shader_va, container, pixel);
 }
 
 #if defined(WWE12_NO_CREATE_SHADERS)
@@ -1700,69 +1697,6 @@ GuestTexture *SvrResolveTexture(u32 texture_va) {
   check.sample = sample;
   check.full_frame = frame;
   return check.host ? check.host : TargetWithSameMemory(texture_va);
-}
-
-
-// 11-21 (the Rock '99 elbow pads never / late appear): in WWE 2K14 the game patched some vertex
-// shaders' microcode after creating them, so the host shader converted at creation was the wrong
-// one. Watch each shader's microcode in the game's memory: found at creation by matching the
-// container's physical part against the pointers in the object's first words (no assumed offset),
-// re-hashed every 120 frames on bind, one warning if it changed.
-namespace {
-struct MicrocodeWatch {
-  u32 phys = 0, size = 0;
-  u64 hash = 0, checked = 0;
-  bool pixel = false, reported = false;
-};
-std::mutex g_watch_mutex;
-std::unordered_map<u32, MicrocodeWatch> g_watch;  // guest shader object -> its microcode
-std::atomic<u32> g_watch_unmatched{0};
-}  // namespace
-
-void SvrWatchShaderMicrocode(u32 shader_va, const void *container_bytes, bool pixel) {
-  const auto *c = static_cast<const ShaderContainer *>(container_bytes);
-  if (!shader_va || !c)
-    return;
-  const u32 vsize = u32(c->virtualSize), psize = u32(c->physicalSize);
-  if (!vsize || !psize || vsize > 0x100000 || psize > 0x100000)
-    return;
-  const u8 *code = reinterpret_cast<const u8 *>(c) + vsize;
-  for (u32 off = 0; off < 0x40; off += 4) {
-    u32 p = bd::mem::try_load<u32>(shader_va + off);
-    if (p && p < 0x20000000u)
-      p |= 0xA0000000u;  // physical microcode address, as seen through the cached window
-    const u8 *m = p ? bd::mem::try_at<const u8>(p) : nullptr;
-    if (!m || std::memcmp(m, code, psize) != 0)
-      continue;
-    std::lock_guard lock(g_watch_mutex);
-    g_watch[shader_va] = {p, psize, XXH3_64bits(m, psize), g_frame.load(std::memory_order_relaxed),
-                          pixel, false};
-    if (g_watch.size() == 100 || g_watch.size() == 500)
-      BD_INFO("[svr] shader microcode watch: {} watched, {} not found", g_watch.size(),
-              g_watch_unmatched.load());
-    return;
-  }
-  if (g_watch_unmatched.fetch_add(1) < 4)
-    BD_INFO("[svr] {} shader 0x{:08X}: microcode copy not found in the object (not watched)",
-            pixel ? "pixel" : "vertex", shader_va);
-}
-
-void SvrCheckShaderMicrocode(u32 shader_va) {
-  const u64 frame = g_frame.load(std::memory_order_relaxed);
-  std::lock_guard lock(g_watch_mutex);
-  auto it = g_watch.find(shader_va);
-  if (it == g_watch.end() || it->second.reported || frame - it->second.checked < 120)
-    return;
-  MicrocodeWatch &w = it->second;
-  w.checked = frame;
-  const u8 *m = bd::mem::try_at<const u8>(w.phys);
-  const u64 hash = m ? XXH3_64bits(m, w.size) : 0;
-  if (hash == w.hash)
-    return;
-  w.reported = true;
-  BD_WARN("[svr] {} shader 0x{:08X}: the game changed its microcode after creating it "
-          "({:016X} -> {:016X}, {} bytes): the host shader is the old one",
-          w.pixel ? "pixel" : "vertex", shader_va, w.hash, hash, w.size);
 }
 
 }  // namespace bd::gpu
