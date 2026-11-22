@@ -78,12 +78,15 @@ struct Json {
   bool boolean = false;
   std::string text;  // string value or raw number token
   std::vector<Json> items;
-  std::vector<std::pair<std::string, Json>> fields;
+  // Names and values side by side: std::pair<std::string, Json> would need Json complete here, which
+  // libstdc++ (Linux) enforces; std::vector<Json> of the incomplete type is allowed.
+  std::vector<std::string> field_names;
+  std::vector<Json> field_values;
 
   const Json* Find(std::string_view key) const {
     if (type != Type::kObject) return nullptr;
-    for (const auto& field : fields) {
-      if (field.first == key) return &field.second;
+    for (size_t i = 0; i < field_names.size(); ++i) {
+      if (field_names[i] == key) return &field_values[i];
     }
     return nullptr;
   }
@@ -305,7 +308,8 @@ class JsonParser {
       ++position_;
       Json value;
       if (!Value(value)) return false;
-      out.fields.emplace_back(std::move(key), std::move(value));
+      out.field_names.push_back(std::move(key));
+      out.field_values.push_back(std::move(value));
       Skip();
       if (position_ >= text_.size()) return false;
       if (text_[position_] == ',') {

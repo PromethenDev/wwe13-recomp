@@ -2389,11 +2389,18 @@ void DrawSettings(AppState& app) {
       const char* exe;
     };
     // The native renderers are experimental (owner 2026-11-19): the names say so, and so does the tooltip.
+#ifdef _WIN32
     static constexpr ApiChoice kApis[] = {{GraphicsApi::kAuto, "Automatic (experimental)", nullptr},
                                           {GraphicsApi::kVulkan, "Vulkan (experimental)", "wwe13_native.exe"},
                                           {GraphicsApi::kD3D12, "DirectX 12 (experimental)", "wwe13_d3d12.exe"},
                                           {GraphicsApi::kD3D11, "DirectX 11 (experimental)", "wwe13_d3d11.exe"},
                                           {GraphicsApi::kEmulated, "Emulated (Xenos)", nullptr}};
+#else
+    // Linux: the native renderer is Vulkan only.
+    static constexpr ApiChoice kApis[] = {{GraphicsApi::kAuto, "Automatic (experimental)", nullptr},
+                                          {GraphicsApi::kVulkan, "Vulkan (experimental)", "wwe13_native"},
+                                          {GraphicsApi::kEmulated, "Emulated (Xenos)", nullptr}};
+#endif
     const char* api_preview = kApis[0].name;
     for (const ApiChoice& choice : kApis) {
       if (choice.api == app.settings.graphics_api) api_preview = choice.name;
@@ -2402,10 +2409,17 @@ void DrawSettings(AppState& app) {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Graphics API");
     if (ImGui::IsItemHovered()) {
+#ifdef _WIN32
       ImGui::SetTooltip("The native renderers (Vulkan, DirectX 12, DirectX 11) are EXPERIMENTAL: faster, but "
                         "some scenes may look wrong or crash. If that happens, pick Emulated.\n"
                         "Automatic starts Vulkan and, when the PC can't run it, DirectX 12, then DirectX 11. "
                         "Emulated draws through the Xbox 360 graphics chip emulation (slower).");
+#else
+      ImGui::SetTooltip("The native Vulkan renderer is EXPERIMENTAL: faster, but some scenes may look wrong or "
+                        "crash. If that happens, pick Emulated.\n"
+                        "Automatic starts Vulkan. Emulated draws through the Xbox 360 graphics chip emulation "
+                        "(slower).");
+#endif
     }
     ImGui::SameLine();
     ImGui::SetNextItemWidth(S(app, 150.0f));

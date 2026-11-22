@@ -230,7 +230,11 @@ namespace {
 // emulation). Their options are the SDK 0.10 / native renderer cvars, not the older build's.
 bool IsPortLayout(const Paths& paths) {
   std::error_code ec;
+#ifdef _WIN32
   return fs::exists(paths.exe_dir / "rexruntime.dll", ec);
+#else
+  return fs::exists(paths.exe_dir / "librexruntime.so", ec);
+#endif
 }
 }  // namespace
 
@@ -264,9 +268,14 @@ LaunchPlan BuildPortLaunchPlan(const Paths& paths, const Settings& settings, con
     const char* file;
     const char* backend;
   };
+#ifdef _WIN32
   static constexpr NativeExe kNativeExes[] = {{GraphicsApi::kVulkan, "wwe13_native.exe", "vulkan"},
                                               {GraphicsApi::kD3D12, "wwe13_d3d12.exe", "d3d12"},
                                               {GraphicsApi::kD3D11, "wwe13_d3d11.exe", "d3d11"}};
+#else
+  // Linux: Vulkan only (Direct3D needs Windows; Proton players use the Windows build).
+  static constexpr NativeExe kNativeExes[] = {{GraphicsApi::kVulkan, "wwe13_native", "vulkan"}};
+#endif
   fs::path native_exe;
   std::string backend = "any";
   if (effective.graphics_api != GraphicsApi::kEmulated) {
