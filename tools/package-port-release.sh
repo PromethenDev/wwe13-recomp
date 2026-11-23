@@ -92,6 +92,8 @@ if [ -n "${LINUX_DIR:-}" ]; then
   python3 "$ROOT/tools/scrub-build-paths.py" --old "$HOME/" --new "$(python3 -c 'import sys; n=len(sys.argv[1]); print(("/build/src/" + "x" * n)[:n-1] + "/")' "$HOME/")" \
     --account "$(basename "$HOME")" "$L/wwe13-launcher" "$L/wwe13_native" "$L/wwe13" "$L"/*.so
   [ -f "$ROOT/docs/LINUX_STEAM_DECK.md" ] && cp "$ROOT/docs/LINUX_STEAM_DECK.md" "$L/"
+  # Empty folders are not zipped: give the Linux game folder its note like the Windows one.
+  printf 'Copy your own complete WWE 13 title update 2.0.1.0 game folder here (Linux build).\n' > "$L/WWE 13/PUT-GAME-FILES-HERE.txt"
 fi
 cp "$ROOT"/launcher2/ui/fonts/*-OFL.txt "$STAGE/licenses/launcher/"
 python3 - "$ROOT/launcher2/thirdparty/miniz/miniz.h" "$STAGE/licenses/launcher/miniz-UNLICENSE.txt" \

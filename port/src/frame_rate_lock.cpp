@@ -66,6 +66,10 @@ constexpr uint32_t kRateStruct = 0x835B2DE8;
 
 int LockFps() {
   const int v = REXCVAR_GET(wwe13_lock_fps);
+#if !defined(SVR_NATIVE_RENDERER)
+  // 120 needs the native renderer's present cap and safety net (Wwe13PresentFpsLimit); the Xenos exe has neither.
+  if (v == 120) return 0;
+#endif
   return v == 40 || v == 50 || v == 120 ? v : 0;
 }
 
@@ -96,6 +100,11 @@ std::atomic<bool> g_scene60{false};
 // 2 s (after the first 30 s), the 60 table is written back and the session stays at 60 (presents capped at 60).
 constexpr uint32_t kTableBytes = 72;
 uint8_t g_table60[kTableBytes];
+// Only the fields the setter writes (+8 rate, +28, +32, +36, +40, +60, +64); the rest of the block holds video-mode fields.
+constexpr uint32_t kSetterFields[] = {8, 28, 32, 36, 40, 60, 64};
+// After two fall-backs in one session the PC can't hold 120: stay at 60 (no slow-motion stretch after every entrance).
+std::atomic<int> g_fallbacks{0};
+constexpr int kMaxFallbacks = 2;
 std::atomic<uint8_t*> g_base{nullptr};
 std::atomic<bool> g_have60{false}, g_fallback60{false};
 // Set when 120 is (re)armed: the first 30 s after boot and 10 s after a re-arm are not measured (match start dip).
@@ -105,7 +114,7 @@ int64_t NowNs() {
 }
 // 100 / 5 windows: a display or vsync limit shows as a steady 60; match starts dip to 70-90 fps for a few seconds
 // (texture uploads, Linux RTX 5060 Ti 11-22), which must not count. Windows that read game files (loading) are skipped.
-constexpr double kMin120 = 100.0;
+constexpr double kMin120 = 112.0;  // Fable review 11-22: 100-111 fps would have meant a permanently slow game
 constexpr int kBadWindows = 5;
 constexpr uint64_t kLoadingBytes = 4ull << 20;
 std::atomic<uint32_t> g_logged{0};
@@ -145,8 +154,9 @@ int Wwe13PresentFpsLimit() {
       window = now; presents = 0;
       uint8_t* base = g_base.load(std::memory_order_relaxed);
       if (bad >= kBadWindows && base && g_have60.load(std::memory_order_acquire)) {
-        std::memcpy(base + kRateStruct, g_table60, kTableBytes);
+        for (uint32_t off : kSetterFields) std::memcpy(base + kRateStruct + off, g_table60 + off, 4);
         g_fallback60.store(true, std::memory_order_relaxed);
+        g_fallbacks.fetch_add(1, std::memory_order_relaxed);
         REXLOG_WARN("[wwe13-rate] 120 fps mode: only {:.0f} frames per second reach the screen (display or PC limit); "
                     "back to 60 until the next match so the game keeps its normal speed", rate);
         return 60;
@@ -226,10 +236,19 @@ extern "C" REX_FUNC(sub_82AA65B0) {
 
 extern "C" REX_FUNC(sub_82AA6650) {
   if (LockFps() == 120) {  // back to 120 through the locked setter above
+    // The game's own restore returns while its hold field (+12) is set (a scene that stays slow): keep the scene's 60.
+    uint32_t hold;
+    std::memcpy(&hold, base + kRateStruct + 12, 4);
+    if (hold != 0) {
+      if (LogMore()) REXLOG_INFO("[wwe13-rate] restore request held by the game (lock 120)");
+      return;
+    }
     const bool was60 = g_scene60.exchange(false, std::memory_order_relaxed);
-    // A new match (end of its entrances): try 120 again after a fall-back, with a 10 s settling time.
-    if (g_fallback60.exchange(false, std::memory_order_relaxed) && LogMore())
-      REXLOG_INFO("[wwe13-rate] 120 fps mode: trying 120 again for this match");
+    // A new match (end of its entrances): try 120 again after a fall-back (at most kMaxFallbacks per session).
+    if (g_fallback60.load(std::memory_order_relaxed) && g_fallbacks.load(std::memory_order_relaxed) < kMaxFallbacks) {
+      g_fallback60.store(false, std::memory_order_relaxed);
+      if (LogMore()) REXLOG_INFO("[wwe13-rate] 120 fps mode: trying 120 again for this match");
+    }
     g_measure_from_ns.store(NowNs() + 10'000'000'000LL, std::memory_order_relaxed);
     ctx.r3.u64 = 60;
     sub_82AA6410(ctx, base);
