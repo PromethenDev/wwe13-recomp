@@ -1561,7 +1561,7 @@ std::string FrameRateName(FrameRate value) {
     case FrameRate::kClassic: return "Classic";
     case FrameRate::kKeep60: return "60 Everywhere";
     case FrameRate::kLock30: return "30 Locked";
-    case FrameRate::k120: return "120";
+    case FrameRate::k120: return "120 (experimental)";
   }
   return "Classic";
 }
@@ -2265,7 +2265,7 @@ void DrawSettings(AppState& app) {
       ImGui::Spacing();
       const std::array<std::pair<FrameRate, const char*>, 4> choices{{
           {FrameRate::kClassic, "Classic"}, {FrameRate::kKeep60, "60 Everywhere"},
-          {FrameRate::kLock30, "30 Locked"}, {FrameRate::k120, "120"},
+          {FrameRate::kLock30, "30 Locked"}, {FrameRate::k120, "120 (exp.)"},
       }};
       const float segment_width = (ImGui::GetContentRegionAvail().x - 3.0f * ImGui::GetStyle().ItemSpacing.x) / 4.0f;
       for (size_t i = 0; i < choices.size(); ++i) {
@@ -2281,7 +2281,7 @@ void DrawSettings(AppState& app) {
                          : current.frame_rate == FrameRate::kKeep60
                              ? "60 Everywhere - needs a strong PC"
                          : current.frame_rate == FrameRate::k120
-                             ? "120 in matches, 60 in entrances - 120 Hz+ screen, strong PC, native renderer"
+                             ? "EXPERIMENTAL: 120 in matches, 60 in entrances - 120 Hz+ screen, strong PC, native renderer"
                              : "Steady 30 everywhere - best for laptops and handhelds";
       DrawTextDisabled(app, hint);
     }
