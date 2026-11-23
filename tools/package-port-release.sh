@@ -79,6 +79,20 @@ PSO_SEED=${PSO_SEED:-$ROOT/port/pso-seed/pipelines_seed.w12p}
 if [ -f "$PSO_SEED" ]; then cp "$PSO_SEED" "$STAGE/pipelines_seed.w12p"; else echo "warning: no pipeline seed at $PSO_SEED" >&2; fi
 python3 "$ROOT/tools/scrub-build-paths.py" --old "$HOME/" --new "$(python3 -c 'import sys; n=len(sys.argv[1]); print(("/build/src/" + "x" * n)[:n-1] + "/")' "$HOME/")" \
   --account "$(basename "$HOME")" "$STAGE"/*.exe "$STAGE"/*.dll
+# Linux build (v1.7, optional): LINUX_DIR holds wwe13-launcher, wwe13_native (Vulkan), wwe13 (Xenos) and the SDK .so files.
+if [ -n "${LINUX_DIR:-}" ]; then
+  L="$STAGE/Linux-x86_64"; mkdir -p "$L/WWE 13"
+  for f in wwe13-launcher wwe13_native wwe13 librexruntime.so librexgpu-xenos.so; do
+    test -f "$LINUX_DIR/$f" || { printf 'Missing Linux file: %s\n' "$LINUX_DIR/$f" >&2; exit 2; }
+    cp "$LINUX_DIR/$f" "$L/"
+  done
+  cp "$ROOT/port/wwe13_runtime.toml" "$L/wwe13.toml"
+  if [ -f "$PSO_SEED" ]; then cp "$PSO_SEED" "$L/pipelines_seed.w12p"; fi
+  strip --strip-debug "$L/wwe13-launcher" "$L/wwe13_native" "$L/wwe13" "$L"/*.so
+  python3 "$ROOT/tools/scrub-build-paths.py" --old "$HOME/" --new "$(python3 -c 'import sys; n=len(sys.argv[1]); print(("/build/src/" + "x" * n)[:n-1] + "/")' "$HOME/")" \
+    --account "$(basename "$HOME")" "$L/wwe13-launcher" "$L/wwe13_native" "$L/wwe13" "$L"/*.so
+  [ -f "$ROOT/docs/LINUX_STEAM_DECK.md" ] && cp "$ROOT/docs/LINUX_STEAM_DECK.md" "$L/"
+fi
 cp "$ROOT"/launcher2/ui/fonts/*-OFL.txt "$STAGE/licenses/launcher/"
 python3 - "$ROOT/launcher2/thirdparty/miniz/miniz.h" "$STAGE/licenses/launcher/miniz-UNLICENSE.txt" \
           "$ROOT/launcher2/thirdparty/picosha2/picosha2.h" "$STAGE/licenses/launcher/picosha2-MIT.txt" <<'PY'
