@@ -7,8 +7,9 @@
 - **120 fps mode.** The launcher's **Frame rate** row has a new **120** choice: matches and menus run at
   120 frames per second, entrances and cutscenes at 60 (instead of 30). Game speed stays the same.
   It needs a 120 Hz (or faster) screen and a strong PC, and works with the native renderers only
-  (Vulkan, DirectX 12, DirectX 11), not with Emulated. Vertical sync is turned off in this mode, so a
-  60 Hz screen can show tearing.
+  (Vulkan, DirectX 12, DirectX 11), not with Emulated. Vertical sync is turned off in this mode. If your
+  screen or PC can't actually show 120 (for example a 60 Hz screen), the game notices within a few
+  seconds and switches back to 60 until the next match, so it never runs in slow motion.
 
 ## Fixed
 - **Custom music is back.** MP3, WAV, FLAC and OGG files in the `music` folder show up again in the
